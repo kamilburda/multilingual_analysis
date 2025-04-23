@@ -1,10 +1,18 @@
-pandas
-datasets
-torch
-requests
-tenacity
-vllm
-cupy
+pandas==2.2.3
+transformers==4.42.4
+datasets==2.20.0
+requests==2.32.3
+tenacity==9.1.2
+vllm==0.5.3
+cupy-cuda12x
 openai==1.2.2
 anthropic==0.18.1
-google-generativeai
+google-generativeai==0.8.4
+rouge-score==0.1.2
+matplotlib
+seaborn
+accelerate
+wheel
+pycld3
+--extra-index-url https://download.pytorch.org/whl/cu126
+torch
