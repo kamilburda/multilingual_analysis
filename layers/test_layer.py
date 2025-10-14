@@ -28,15 +28,14 @@ tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen2-7B-Instruct")
 model = AutoModelForCausalLM.from_pretrained("Qwen/Qwen2-7B-Instruct", device_map="auto")
 
 
-
 def tracefunc(frame, event, arg, indent=[0]):
-      if event == "call":
-          indent[0] += 2
-          print("-" * indent[0] + "> call function", frame.f_code.co_name)
-      elif event == "return":
-          print("<" + "-" * indent[0], "exit function", frame.f_code.co_name)
-          indent[0] -= 2
-      return tracefunc
+    if event == "call":
+        indent[0] += 2
+        print("-" * indent[0] + "> call function", frame.f_code.co_name)
+    elif event == "return":
+        print("<" + "-" * indent[0], "exit function", frame.f_code.co_name)
+        indent[0] -= 2
+    return tracefunc
 
 
 def Prompting(model, prompt, candidate_premature_layers):
@@ -139,7 +138,6 @@ def plot_lang_distribution(lang_distribution, candidate_langs, candidate_layers)
     plt.ylabel('Language')
     plt.show()
     plt.savefig('lang_distribution.png')
-
 
 
 def main(argv):
@@ -271,7 +269,6 @@ def main(argv):
     "Tulis esai reflektif tentang peranan bahasa Melayu dalam memperkukuh identiti nasional Malaysia."
     ]
 
-
     prompts = zh_prompts + vi_prompts + th_prompts + id_prompts + ms_prompts
 
     # candidate_premature_layers = [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40]
@@ -305,4 +302,3 @@ def main(argv):
 if __name__ == "__main__":
     # sys.setprofile(tracefunc)
     main(sys.argv[1:])
-
