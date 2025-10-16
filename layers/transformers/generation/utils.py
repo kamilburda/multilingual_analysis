@@ -1822,9 +1822,6 @@ class GenerationMixin:
             generation_config=generation_config, stopping_criteria=stopping_criteria, tokenizer=tokenizer, **kwargs
         )
 
-        # TODO: If the mode is not greedy search, change it to greedy search (by passing transformers.GenerationConfig(do_sample=False))
-        print(f'generation_mode: {generation_mode}')
-
         # 10. go into different generation modes
         if generation_mode == GenerationMode.ASSISTED_GENERATION:
             if generation_config.num_return_sequences > 1:
@@ -2694,12 +2691,12 @@ class GenerationMixin:
 
             # TODO: This could be replaceable with a hook since we only make use of the output of a model's forward() here
             if len(hidden_token_cont) == 0:
-                for layer_index, logit in logits_dict.values():
+                for layer_index, logit in logits_dict.items():
                     # hidden_token_cont[layer_index] = torch.argmax(logit, dim=-1)
                     _topk_values, topk_indices = torch.topk(logit, 10, dim=-1)
                     hidden_token_cont[layer_index] = topk_indices.view(*topk_indices.shape[:-2], -1)
             else:
-                for layer_index, logit in logits_dict.values():
+                for layer_index, logit in logits_dict.items():
                     # hidden_token_cont[layer_index] = torch.cat([hidden_token_cont[layer_index], torch.argmax(logit, dim=-1)], dim=-1)
                     _topk_values, topk_indices = torch.topk(logit, 10, dim=-1)
                     hidden_token_cont[layer_index] = torch.cat([hidden_token_cont[layer_index], topk_indices.view(*topk_indices.shape[:-2], -1)], dim=-1)
