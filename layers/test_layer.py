@@ -144,6 +144,10 @@ def main(argv):
 
     print(model)
 
+    # Force greedy search
+    model.generation_config.do_sample = False
+    model.generation_config.num_beams = 1
+
     zh_prompts = [
     "问题：有哪些关于自我提升的好书？答案：",
     "问题：推荐一个中国苏州的旅游攻略。答案：",
