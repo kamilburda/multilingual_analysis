@@ -7,7 +7,6 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 from rouge_score import rouge_scorer
 import random
 from itertools import groupby
-import pdb
 import re
 import sys
 from tqdm import tqdm
@@ -305,7 +304,6 @@ def main(argv):
         
     # if draw all languages independently
     average_lang_distribution = average_layerwise_lang_distribution(lst_lang_distribution, candidate_langs)
-    # pdb.set_trace()
     plot_lang_distribution(average_lang_distribution, candidate_langs, model_name)
 
 
