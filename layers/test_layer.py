@@ -125,14 +125,20 @@ def average_layerwise_lang_distribution(lst_lang_distribution, candidate_langs):
     return average_lang_distribution
 
 
-def plot_lang_distribution(lang_distribution, candidate_langs, candidate_layers):
+def plot_lang_distribution(lang_distribution, candidate_langs):
     lang_distribution_matrix = []
-    for layer in candidate_layers:
-        lang_distribution_matrix.append([lang_distribution[layer][lang] for lang in candidate_langs])
+    for layer_index in lang_distribution:
+        lang_distribution_matrix.append([lang_distribution[layer_index][lang] for lang in candidate_langs])
     lang_distribution_matrix = np.array(lang_distribution_matrix).T
-    fig, ax = plt.subplots(figsize=(11,3))
+    _fig, ax = plt.subplots(figsize=(11,3))
     cmap = sns.color_palette("ch:start=.2,rot=-.3", as_cmap=True)
-    sns.heatmap(lang_distribution_matrix, ax=ax, xticklabels=candidate_layers, yticklabels=candidate_langs, cmap=cmap)
+    sns.heatmap(
+        lang_distribution_matrix,
+        ax=ax,
+        xticklabels=list(range(len(lang_distribution))),
+        yticklabels=candidate_langs,
+        cmap=cmap,
+    )
     plt.title('Layerwise Language Distribution')
     plt.xlabel('Layer')
     plt.ylabel('Language')
@@ -291,11 +297,11 @@ def main(argv):
     
     # if only draw english and non-english
     # average_lang_distribution = average_layerwise_lang_distribution(lst_lang_distribution, candidate_langs=['en', 'non-en'])
-    # plot_lang_distribution(average_lang_distribution, candidate_langs=['en', 'non-en'], candidate_layers=candidate_layers)
+    # plot_lang_distribution(average_lang_distribution, candidate_langs=['en', 'non-en'])
         
     # if draw all languages independently
     average_lang_distribution = average_layerwise_lang_distribution(lst_lang_distribution, candidate_langs)
-    plot_lang_distribution(average_lang_distribution, candidate_langs, candidate_layers=candidate_layers)
+    plot_lang_distribution(average_lang_distribution, candidate_langs)
     # pdb.set_trace()
 
 
