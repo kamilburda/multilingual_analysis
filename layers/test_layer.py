@@ -24,10 +24,6 @@ import seaborn as sns
 random.seed(112)
 
 
-tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen2-7B-Instruct")
-model = AutoModelForCausalLM.from_pretrained("Qwen/Qwen2-7B-Instruct", device_map="auto")
-
-
 def tracefunc(frame, event, arg, indent=[0]):
     if event == "call":
         indent[0] += 2
@@ -38,7 +34,7 @@ def tracefunc(frame, event, arg, indent=[0]):
     return tracefunc
 
 
-def Prompting(model, prompt):
+def Prompting(model, tokenizer, prompt):
     inputs = tokenizer(prompt, return_tensors="pt").to("cuda")
     hidden_states, outputs = model.generate(**{'input_ids': inputs.input_ids, 'max_new_tokens': 64})
     # hidden_states, outputs = model.generate(**{'input_ids':inputs.input_ids})
@@ -147,6 +143,11 @@ def plot_lang_distribution(lang_distribution, candidate_langs):
 
 
 def main(argv):
+
+    model_name = "Qwen/Qwen2-7B-Instruct"
+
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    model = AutoModelForCausalLM.from_pretrained(model_name, device_map="auto")
 
     print(model)
 
@@ -286,7 +287,7 @@ def main(argv):
 
     lst_lang_distribution = []
     for prompt in tqdm(prompts):
-        hidden_embed, hidden_embed_token_level, answer = Prompting(model, prompt)
+        hidden_embed, hidden_embed_token_level, answer = Prompting(model, tokenizer, prompt)
         lang_stats = layerwise_lang_stats(hidden_embed_token_level, candidate_langs)
 
         # if only draw english and non-english
