@@ -38,15 +38,15 @@ def tracefunc(frame, event, arg, indent=[0]):
     return tracefunc
 
 
-def Prompting(model, prompt, candidate_premature_layers):
+def Prompting(model, prompt):
     inputs = tokenizer(prompt, return_tensors="pt").to("cuda")
     hidden_states, outputs = model.generate(**{'input_ids':inputs.input_ids, 'max_new_tokens':64})
     # hidden_states, outputs = model.generate(**{'input_ids':inputs.input_ids})
     hidden_embed = {}
     hidden_embed_token_level = {}
-    for i, early_exit_layer in enumerate(candidate_premature_layers):
-        hidden_embed[early_exit_layer] = tokenizer.decode(hidden_states[early_exit_layer][0])
-        hidden_embed_token_level[early_exit_layer] = [tokenizer.decode(tok) for tok in hidden_states[early_exit_layer][0]]
+    for layer_index in hidden_states:
+        hidden_embed[layer_index] = tokenizer.decode(hidden_states[layer_index][0])
+        hidden_embed_token_level[layer_index] = [tokenizer.decode(tok) for tok in hidden_states[layer_index][0]]
     answer = tokenizer.decode(outputs[0]).replace('<pad> ', '')
     answer = answer.replace('</s>', '')
     
@@ -275,16 +275,12 @@ def main(argv):
 
     prompts = zh_prompts + vi_prompts + th_prompts + id_prompts + ms_prompts
 
-    # candidate_premature_layers = [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40]
-    candidate_premature_layers = [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28]
     # candidate_langs = ['en', 'zh', 'es', 'ru', 'de', 'fr']
     candidate_langs = ['en', 'zh', 'vi', 'th', 'id', 'ms']
-    # candidate_layers = [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40]
-    candidate_layers = [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28]
 
     lst_lang_distribution = []
     for prompt in tqdm(prompts):
-        hidden_embed, hidden_embed_token_level, answer = Prompting(model, prompt, candidate_premature_layers)
+        hidden_embed, hidden_embed_token_level, answer = Prompting(model, prompt)
         lang_stats = layerwise_lang_stats(hidden_embed_token_level, candidate_langs)
 
         # if only draw english and non-english
