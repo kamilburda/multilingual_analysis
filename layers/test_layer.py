@@ -121,7 +121,7 @@ def average_layerwise_lang_distribution(lst_lang_distribution, candidate_langs):
     return average_lang_distribution
 
 
-def plot_lang_distribution(lang_distribution, candidate_langs):
+def plot_lang_distribution(lang_distribution, candidate_langs, model_name):
     lang_distribution_matrix = []
     for layer_index in lang_distribution:
         lang_distribution_matrix.append([lang_distribution[layer_index][lang] for lang in candidate_langs])
@@ -135,11 +135,14 @@ def plot_lang_distribution(lang_distribution, candidate_langs):
         yticklabels=candidate_langs,
         cmap=cmap,
     )
+
+    processed_model_name = model_name.replace('/', '-')
+
     plt.title('Layerwise Language Distribution')
     plt.xlabel('Layer')
     plt.ylabel('Language')
     plt.show()
-    plt.savefig('lang_distribution.png')
+    plt.savefig(f'lang_distribution_{processed_model_name}.png')
 
 
 def main(argv):
@@ -302,8 +305,8 @@ def main(argv):
         
     # if draw all languages independently
     average_lang_distribution = average_layerwise_lang_distribution(lst_lang_distribution, candidate_langs)
-    plot_lang_distribution(average_lang_distribution, candidate_langs)
     # pdb.set_trace()
+    plot_lang_distribution(average_lang_distribution, candidate_langs, model_name)
 
 
 if __name__ == "__main__":
