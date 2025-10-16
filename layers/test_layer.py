@@ -40,7 +40,7 @@ def tracefunc(frame, event, arg, indent=[0]):
 
 def Prompting(model, prompt):
     inputs = tokenizer(prompt, return_tensors="pt").to("cuda")
-    hidden_states, outputs = model.generate(**{'input_ids':inputs.input_ids, 'max_new_tokens':64})
+    hidden_states, outputs = model.generate(**{'input_ids': inputs.input_ids, 'max_new_tokens': 64})
     # hidden_states, outputs = model.generate(**{'input_ids':inputs.input_ids})
     hidden_embed = {}
     hidden_embed_token_level = {}
@@ -53,7 +53,7 @@ def Prompting(model, prompt):
     return hidden_embed, hidden_embed_token_level, answer
 
 
-def layerwise_lang_stats(hidden_embed_token_level, candidate_langs=['en', 'zh', 'es', 'ru', 'de', 'fr']):
+def layerwise_lang_stats(hidden_embed_token_level, candidate_langs):
     lang_stats = {}
     for layer in hidden_embed_token_level:
         lang_stats[layer] = {'total_count':0}
@@ -100,7 +100,7 @@ def layerwise_lang_distribution_th(lang_distribution):
     return lang_distribution_bi
 
 
-def average_layerwise_lang_distribution(lst_lang_distribution, candidate_langs=['en', 'zh', 'es', 'ru', 'de', 'fr']):
+def average_layerwise_lang_distribution(lst_lang_distribution, candidate_langs):
     average_lang_distribution = {}
     for lang_distribution in lst_lang_distribution:
         for layer in lang_distribution:
