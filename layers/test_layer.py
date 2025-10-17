@@ -125,7 +125,7 @@ def plot_lang_distribution(lang_distribution, candidate_langs, model_name):
     for layer_index in lang_distribution:
         lang_distribution_matrix.append([lang_distribution[layer_index][lang] for lang in candidate_langs])
     lang_distribution_matrix = np.array(lang_distribution_matrix).T
-    _fig, ax = plt.subplots(figsize=(11,3))
+    _fig, ax = plt.subplots(figsize=(11,3), layout="constrained")
     cmap = sns.color_palette("ch:start=.2,rot=-.3", as_cmap=True)
     sns.heatmap(
         lang_distribution_matrix,
