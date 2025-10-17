@@ -154,7 +154,7 @@ def save_lang_distribution(lang_distribution, model_name):
 
 def main(argv):
 
-    model_name = "Qwen/Qwen2-1.5B-Instruct"
+    model_name = "Qwen/Qwen2-7B-Instruct"
 
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     model = AutoModelForCausalLM.from_pretrained(model_name, device_map="auto")
