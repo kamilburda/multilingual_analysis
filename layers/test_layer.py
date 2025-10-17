@@ -19,6 +19,7 @@ import cld3
 import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
+import pickle
 
 random.seed(112)
 
@@ -144,9 +145,16 @@ def plot_lang_distribution(lang_distribution, candidate_langs, model_name):
     plt.savefig(f'lang_distribution_{processed_model_name}.png')
 
 
+def save_lang_distribution(lang_distribution, model_name):
+    processed_model_name = model_name.replace('/', '-')
+
+    with open(f'lang_distribution_{processed_model_name}.pkl', 'wb') as f:
+        pickle.dump(lang_distribution, f)
+
+
 def main(argv):
 
-    model_name = "Qwen/Qwen2-7B-Instruct"
+    model_name = "Qwen/Qwen2-1.5B-Instruct"
 
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     model = AutoModelForCausalLM.from_pretrained(model_name, device_map="auto")
@@ -305,6 +313,8 @@ def main(argv):
     # if draw all languages independently
     average_lang_distribution = average_layerwise_lang_distribution(lst_lang_distribution, candidate_langs)
     plot_lang_distribution(average_lang_distribution, candidate_langs, model_name)
+
+    save_lang_distribution(average_lang_distribution, model_name)
 
 
 if __name__ == "__main__":
