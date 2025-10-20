@@ -34,10 +34,47 @@ def tracefunc(frame, event, arg, indent=[0]):
     return tracefunc
 
 
-def Prompting(model, tokenizer, prompt):
+def Prompting(
+        model,
+        tokenizer,
+        prompt,
+        max_new_tokens: Optional[int] = 64,
+):
     inputs = tokenizer(prompt, return_tensors="pt").to("cuda")
-    hidden_states, outputs = model.generate(**{'input_ids': inputs.input_ids, 'max_new_tokens': 64})
-    # hidden_states, outputs = model.generate(**{'input_ids':inputs.input_ids})
+
+    hidden_states = {}
+
+    def store_hidden_states_hook(model_, input_, output):
+        logits_dict = {}
+        for layer_index in output.hidden_states:
+            logits = model_.lm_head(output.hidden_states[layer_index])
+            logits = logits.float()
+            logits_dict[layer_index] = logits
+
+        # TODO: Try appending to a list and then call torch.cat only once outside this code
+        # TODO: This may not yield the same results as embedding this code inside `model._sample()` in case of multiple GPUs.
+        if len(hidden_states) == 0:
+            for layer_index, logit in logits_dict.items():
+                # hidden_states[layer_index] = torch.argmax(logit, dim=-1)
+                _topk_values, topk_indices = torch.topk(logit, 10, dim=-1)
+                hidden_states[layer_index] = topk_indices.view(*topk_indices.shape[:-2], -1)
+        else:
+            for layer_index, logit in logits_dict.items():
+                # hidden_states[layer_index] = torch.cat([hidden_states[layer_index], torch.argmax(logit, dim=-1)], dim=-1)
+                _topk_values, topk_indices = torch.topk(logit, 10, dim=-1)
+                hidden_states[layer_index] = torch.cat([hidden_states[layer_index], topk_indices.view(*topk_indices.shape[:-2], -1)], dim=-1)
+
+    store_hidden_states_handle = model.register_module_forward_hook(store_hidden_states_hook)
+
+    outputs = model.generate(
+        input_ids=inputs.input_ids,
+        max_new_tokens=max_new_tokens,
+        return_dict_in_generate=True,
+        output_hidden_states=True,
+    )
+
+    store_hidden_states_handle.remove()
+
     hidden_embed = {}
     hidden_embed_token_level = {}
     for layer_index in hidden_states:
