@@ -1,4 +1,5 @@
 import cld3
+import collections
 import logging
 import pickle
 import random
@@ -36,7 +37,8 @@ def Prompting(
 ):
     inputs = tokenizer(prompt, return_tensors="pt").to("cuda")
 
-    hidden_states = {}
+    hidden_states_as_lists = collections.defaultdict(list)
+
 
     def store_hidden_states_hook(model_, input_, output):
         logits_dict = {}
@@ -45,18 +47,11 @@ def Prompting(
             logits = logits.float()
             logits_dict[layer_index] = logits
 
-        # TODO: Try appending to a list and then call torch.cat only once outside this code
         # TODO: This may not yield the same results as embedding this code inside `model._sample()` in case of multiple GPUs.
-        if len(hidden_states) == 0:
-            for layer_index, logit in logits_dict.items():
-                # hidden_states[layer_index] = torch.argmax(logit, dim=-1)
-                _topk_values, topk_indices = torch.topk(logit, 10, dim=-1)
-                hidden_states[layer_index] = topk_indices.view(*topk_indices.shape[:-2], -1)
-        else:
-            for layer_index, logit in logits_dict.items():
-                # hidden_states[layer_index] = torch.cat([hidden_states[layer_index], torch.argmax(logit, dim=-1)], dim=-1)
-                _topk_values, topk_indices = torch.topk(logit, 10, dim=-1)
-                hidden_states[layer_index] = torch.cat([hidden_states[layer_index], topk_indices.view(*topk_indices.shape[:-2], -1)], dim=-1)
+        for layer_index, logit in logits_dict.items():
+            _topk_values, topk_indices = torch.topk(logit, 10, dim=-1)
+            hidden_states_as_lists[layer_index].append(topk_indices.view(*topk_indices.shape[:-2], -1))
+
 
     store_hidden_states_handle = model.register_module_forward_hook(store_hidden_states_hook)
 
@@ -68,6 +63,10 @@ def Prompting(
     )
 
     store_hidden_states_handle.remove()
+
+    hidden_states = {}
+    for layer_index in hidden_states_as_lists:
+        hidden_states[layer_index] = torch.cat(hidden_states_as_lists[layer_index], dim=-1)
 
     hidden_embed = {}
     hidden_embed_token_level = {}
