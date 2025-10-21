@@ -322,9 +322,12 @@ ms_prompts = [
 
 @click.command()
 @click.option("--max-new-tokens", default=64, help="Maximum number of tokens to generate. Set to 0 to ignore.")
-def main(max_new_tokens):
-    model_name = "Qwen/Qwen2-7B-Instruct"
-
+@click.option(
+    "--model-name",
+    default="Qwen/Qwen2-7B-Instruct",
+    help="Name of the model for which to measure the amount of tokens per language.",
+)
+def main(max_new_tokens, model_name):
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     model = AutoModelForCausalLM.from_pretrained(model_name, device_map="auto")
 
