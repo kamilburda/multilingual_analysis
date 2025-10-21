@@ -1,4 +1,5 @@
 import cld3
+import click
 import collections
 import logging
 import pickle
@@ -35,6 +36,9 @@ def Prompting(
         prompt,
         max_new_tokens: Optional[int] = 64,
 ):
+    if max_new_tokens == 0:
+        max_new_tokens = None
+
     inputs = tokenizer(prompt, return_tensors="pt").to("cuda")
 
     hidden_states_as_lists = collections.defaultdict(list)
@@ -182,20 +186,7 @@ def save_lang_distribution(lang_distribution, model_name):
         pickle.dump(lang_distribution, f)
 
 
-def main(argv):
-
-    model_name = "Qwen/Qwen2-7B-Instruct"
-
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
-    model = AutoModelForCausalLM.from_pretrained(model_name, device_map="auto")
-
-    print(model)
-
-    # Force greedy search
-    model.generation_config.do_sample = False
-    model.generation_config.num_beams = 1
-
-    zh_prompts = [
+zh_prompts = [
     "问题：有哪些关于自我提升的好书？答案：",
     "问题：推荐一个中国苏州的旅游攻略。答案：",
     "问题：有哪些适合学习时听的歌推荐？答案：",
@@ -206,8 +197,9 @@ def main(argv):
     "如何找到适合自己的学习方法？",
     "香港有哪些购物的好地方？",
     "如何制作一道地道的中式菜肴？",
-    ]
-    en_prompts = [
+]
+
+en_prompts = [
     "What are some popular tourist attractions in New York City?",
     "How can I improve my English writing skills?",
     "Can you recommend three must-read books from the science fiction genre?",
@@ -217,9 +209,10 @@ def main(argv):
     "Can you suggest three classic movies from the 20th century?",
     "How can I develop good public speaking skills?",
     "What are some unique cultural traditions in Japan?",
-    "Can you recommend three budget-friendly destinations for solo travelers?"
-    ]
-    de_prompts = [
+    "Can you recommend three budget-friendly destinations for solo travelers?",
+]
+
+de_prompts = [
     "Frage: Was sind die besten deutschen Filme? Antwort: ",
     "Frage: Was sind die besten deutschen Bücher? Antwort: ",
     "Frage: Wie kann ich meine Deutschkenntnisse verbessern? Antwort: ",
@@ -232,9 +225,10 @@ def main(argv):
     "Was sind die besten deutschen Serien?",
     "Was sind die besten deutschen Lieder?"
     "Kannst du drei günstige Reiseziele in Österreich für Einzelreisende empfehlen?",
-    "Was sind effektive Strategien zur Stressbewältigung?"
-    ]
-    fr_prompts = [
+    "Was sind effektive Strategien zur Stressbewältigung?",
+]
+
+fr_prompts = [
     "Question: Quels sont les meilleurs restaurants à Paris? Répondre: ",
     "Question: Quels sont les meilleurs films français? Répondre: ",
     "Question: Comment améliorer ma compréhension écrite? Répondre: "
@@ -245,8 +239,9 @@ def main(argv):
     "Comment améliorer mon français?",
     "Comment améliorer mon accent français?",
     "Comment améliorer ma compréhension orale?",
-    ]
-    es_prompts = [
+]
+
+es_prompts = [
     "Pregunta: ¿Cuáles son los mejores restaurantes en Madrid? Respuesta: ",
     "Pregunta: ¿Cuáles son las mejores películas españolas? Respuesta: ",
     "Pregunta: ¿Cómo puedo mejorar mi comprensión oral? Respuesta: ",
@@ -256,9 +251,10 @@ def main(argv):
     "¿Cuáles son las mejores canciones españolas?",
     "¿Cómo puedo mejorar mi español?",
     "¿Cómo puedo mejorar mi acento español?",
-    "¿Cómo puedo mejorar mi comprensión escrita?"
-    ]
-    ru_prompts = [
+    "¿Cómo puedo mejorar mi comprensión escrita?",
+]
+
+ru_prompts = [
     "вопрос: Какие рестораны в Москве самые лучшие? Отвечать: ",
     "вопрос: Какие фильмы русские самые лучшие? Отвечать: ",
     "вопрос: Как я могу улучшить мой русский письмо? Отвечать: "
@@ -269,9 +265,9 @@ def main(argv):
     "Как я могу улучшить мой русский?",
     "Как я могу улучшить мой русский акцент?",
     "Как я могу улучшить мой русский слух?",
-    ]
+]
 
-    vi_prompts = [
+vi_prompts = [
     "Viết một đoạn văn ngắn kể về một cuộc phiêu lưu của bạn trong một ngôi làng nông thôn ở Việt Nam.",
     "Miêu tả một ngày hè tại bãi biển Nha Trang.",
     "Viết một bài thơ ngắn về cảnh đẹp của thác Bản Giốc.",
@@ -282,8 +278,9 @@ def main(argv):
     "Hãy viết một đoạn văn ngắn về một danh lam thắng cảnh nổi tiếng ở Huế.",
     "Hãy viết một bài thơ ngắn về những con thuyền trên sông Hàn ở Đà Nẵng.",
     "Mô tả một buổi sáng tại chợ Bến Thành ở Sài Gòn.",
-    ]
-    th_prompts = [
+]
+
+th_prompts = [
     "คุณชอบกินอาหารไทยประเภทใดที่สุดและเพราะอะไร?",
     "คุณเคยไปเที่ยวที่ไทยมาก่อนหรือไม่? ถ้าใช่ สถานที่ไหนที่คุณแนะนำให้คนอื่นไปเยือน?",
     "คุณคิดว่าวัฒนธรรมและประเพณีในประเทศไทยมีความสำคัญอย่างไร?",
@@ -293,9 +290,10 @@ def main(argv):
     "หากคุณได้สัมผัสวิถีชีวิตของชาวไทยตั้งแต่ต้นจนปลาย อะไรบ้างที่คุณคิดว่าจะต้องปรับเปลี่ยนหรือปรับปรุง?",
     "คุณเคยเรียนรู้ภาษาไทยมาก่อนหรือไม่? ถ้าเคยคุณคิดว่าภาษาไทยมีความยากหรือง่ายอย่างไร?",
     "คุณมีเคล็ดลับในการท่องเที่ยวในประเทศไทยหรือไม่? ถ้ามีคุณสามารถบอกเราได้ไหม?",
-    "คุณเคยพบกับความเปลี่ยนแปลงในประเทศไทยในช่วง 5 ปีที่ผ่านมาหรือไม่? ถ้าเคยคุณคิดว่ามีอะไรที่ทำให้คุณประทับใจ?"
-    ]
-    id_prompts = [
+    "คุณเคยพบกับความเปลี่ยนแปลงในประเทศไทยในช่วง 5 ปีที่ผ่านมาหรือไม่? ถ้าเคยคุณคิดว่ามีอะไรที่ทำให้คุณประทับใจ?",
+]
+
+id_prompts = [
     "Ceritakan tentang seorang anak desa yang menemukan sebuah lampu ajaib saat bermain di tepian sungai.",
     "Apa pendapat Anda tentang pengaruh media sosial terhadap remaja di Indonesia saat ini?",
     "Tulislah surat resmi kepada kepala sekolah untuk meminta izin menggunakan aula untuk kegiatan ekstrakurikuler.",
@@ -306,8 +304,9 @@ def main(argv):
     "Buatlah panduan wisata singkat untuk turis asing yang ingin mengunjungi Bali.",
     "Tulislah cerita fabel yang mengajarkan tentang pentingnya kejujuran dengan tokoh utama seekor kancil dan harimau.",
     "Tuliskan refleksi pribadi Anda tentang peran pendidikan dalam mengubah masa depan generasi muda di Indonesia.",
-    ]
-    ms_prompts = [
+]
+
+ms_prompts = [
     "Tulis sebuah cerita pendek tentang seorang nelayan yang menemukan pesan dalam botol saat melaut.",
     "Apakah pandangan anda mengenai impak teknologi terhadap pendidikan di Malaysia?",
     "Huraikan suasana di Jalan Alor, Kuala Lumpur pada waktu malam.",
@@ -317,8 +316,21 @@ def main(argv):
     "Buat ulasan tentang sebuah novel yang anda baca baru-baru ini oleh penulis Malaysia.",
     "Buat panduan ringkas untuk pelancong asing yang ingin mengunjungi Taman Negara Pahang.",
     "Tulislah sebuah dongeng yang mengandungi pengajaran tentang kebaikan dan kesabaran dengan watak utama sang kancil.",
-    "Tulis esai reflektif tentang peranan bahasa Melayu dalam memperkukuh identiti nasional Malaysia."
-    ]
+    "Tulis esai reflektif tentang peranan bahasa Melayu dalam memperkukuh identiti nasional Malaysia.",
+]
+
+
+@click.command()
+@click.option("--max-new-tokens", default=64, help="Maximum number of tokens to generate. Set to 0 to ignore.")
+def main(max_new_tokens):
+    model_name = "Qwen/Qwen2-7B-Instruct"
+
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    model = AutoModelForCausalLM.from_pretrained(model_name, device_map="auto")
+
+    # Force greedy search
+    model.generation_config.do_sample = False
+    model.generation_config.num_beams = 1
 
     prompts = zh_prompts + vi_prompts + th_prompts + id_prompts + ms_prompts
 
@@ -327,7 +339,12 @@ def main(argv):
 
     lst_lang_distribution = []
     for prompt in tqdm(prompts):
-        hidden_embed, hidden_embed_token_level, answer = Prompting(model, tokenizer, prompt)
+        hidden_embed, hidden_embed_token_level, answer = Prompting(
+            model,
+            tokenizer,
+            prompt,
+            max_new_tokens=max_new_tokens,
+        )
         lang_stats = layerwise_lang_stats(hidden_embed_token_level, candidate_langs)
 
         # if only draw english and non-english
@@ -348,5 +365,4 @@ def main(argv):
 
 
 if __name__ == "__main__":
-    # sys.setprofile(tracefunc)
     main(sys.argv[1:])
