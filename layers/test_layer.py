@@ -364,9 +364,8 @@ def main(
     if not languages:
         languages = ['zh', 'vi', 'th', 'id', 'ms']
 
+    all_prompts = [prompt for language in languages for prompt in prompts[language]]
     candidate_langs = ['en'] + list(languages)
-
-    all_prompts = [prompt for language in candidate_langs for prompt in prompts[language]]
 
     lst_lang_distribution = []
     for prompt in tqdm(all_prompts):
