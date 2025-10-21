@@ -46,7 +46,8 @@ def Prompting(
 
     def store_hidden_states_hook(model_, input_, output):
         logits_dict = {}
-        for layer_index in output.hidden_states:
+
+        for layer_index in range(len(output.hidden_states)):
             logits = model_.lm_head(output.hidden_states[layer_index])
             logits = logits.float()
             logits_dict[layer_index] = logits
@@ -57,7 +58,7 @@ def Prompting(
             hidden_states_as_lists[layer_index].append(topk_indices.view(*topk_indices.shape[:-2], -1))
 
 
-    store_hidden_states_handle = model.register_module_forward_hook(store_hidden_states_hook)
+    store_hidden_states_handle = model.register_forward_hook(store_hidden_states_hook)
 
     outputs = model.generate(
         input_ids=inputs.input_ids,
@@ -77,7 +78,7 @@ def Prompting(
     for layer_index in hidden_states:
         hidden_embed[layer_index] = tokenizer.decode(hidden_states[layer_index][0])
         hidden_embed_token_level[layer_index] = [tokenizer.decode(tok) for tok in hidden_states[layer_index][0]]
-    answer = tokenizer.decode(outputs[0]).replace('<pad> ', '')
+    answer = tokenizer.decode(outputs[0][0]).replace('<pad> ', '')
     answer = answer.replace('</s>', '')
     
     return hidden_embed, hidden_embed_token_level, answer
@@ -334,6 +335,8 @@ def main(max_new_tokens, model_name):
     # Force greedy search
     model.generation_config.do_sample = False
     model.generation_config.num_beams = 1
+
+    model.config.output_hidden_states = True
 
     prompts = zh_prompts + vi_prompts + th_prompts + id_prompts + ms_prompts
 
