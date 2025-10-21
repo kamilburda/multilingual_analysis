@@ -187,7 +187,9 @@ def save_lang_distribution(lang_distribution, model_name):
         pickle.dump(lang_distribution, f)
 
 
-zh_prompts = [
+prompts = {}
+
+prompts["zh"] = [
     "问题：有哪些关于自我提升的好书？答案：",
     "问题：推荐一个中国苏州的旅游攻略。答案：",
     "问题：有哪些适合学习时听的歌推荐？答案：",
@@ -200,7 +202,7 @@ zh_prompts = [
     "如何制作一道地道的中式菜肴？",
 ]
 
-en_prompts = [
+prompts["en"] = [
     "What are some popular tourist attractions in New York City?",
     "How can I improve my English writing skills?",
     "Can you recommend three must-read books from the science fiction genre?",
@@ -213,7 +215,7 @@ en_prompts = [
     "Can you recommend three budget-friendly destinations for solo travelers?",
 ]
 
-de_prompts = [
+prompts["de"] = [
     "Frage: Was sind die besten deutschen Filme? Antwort: ",
     "Frage: Was sind die besten deutschen Bücher? Antwort: ",
     "Frage: Wie kann ich meine Deutschkenntnisse verbessern? Antwort: ",
@@ -229,7 +231,7 @@ de_prompts = [
     "Was sind effektive Strategien zur Stressbewältigung?",
 ]
 
-fr_prompts = [
+prompts["fr"] = [
     "Question: Quels sont les meilleurs restaurants à Paris? Répondre: ",
     "Question: Quels sont les meilleurs films français? Répondre: ",
     "Question: Comment améliorer ma compréhension écrite? Répondre: "
@@ -242,7 +244,7 @@ fr_prompts = [
     "Comment améliorer ma compréhension orale?",
 ]
 
-es_prompts = [
+prompts["es"] = [
     "Pregunta: ¿Cuáles son los mejores restaurantes en Madrid? Respuesta: ",
     "Pregunta: ¿Cuáles son las mejores películas españolas? Respuesta: ",
     "Pregunta: ¿Cómo puedo mejorar mi comprensión oral? Respuesta: ",
@@ -255,7 +257,7 @@ es_prompts = [
     "¿Cómo puedo mejorar mi comprensión escrita?",
 ]
 
-ru_prompts = [
+prompts["ru"] = [
     "вопрос: Какие рестораны в Москве самые лучшие? Отвечать: ",
     "вопрос: Какие фильмы русские самые лучшие? Отвечать: ",
     "вопрос: Как я могу улучшить мой русский письмо? Отвечать: "
@@ -268,7 +270,7 @@ ru_prompts = [
     "Как я могу улучшить мой русский слух?",
 ]
 
-vi_prompts = [
+prompts["vi"] = [
     "Viết một đoạn văn ngắn kể về một cuộc phiêu lưu của bạn trong một ngôi làng nông thôn ở Việt Nam.",
     "Miêu tả một ngày hè tại bãi biển Nha Trang.",
     "Viết một bài thơ ngắn về cảnh đẹp của thác Bản Giốc.",
@@ -281,7 +283,7 @@ vi_prompts = [
     "Mô tả một buổi sáng tại chợ Bến Thành ở Sài Gòn.",
 ]
 
-th_prompts = [
+prompts["th"] = [
     "คุณชอบกินอาหารไทยประเภทใดที่สุดและเพราะอะไร?",
     "คุณเคยไปเที่ยวที่ไทยมาก่อนหรือไม่? ถ้าใช่ สถานที่ไหนที่คุณแนะนำให้คนอื่นไปเยือน?",
     "คุณคิดว่าวัฒนธรรมและประเพณีในประเทศไทยมีความสำคัญอย่างไร?",
@@ -294,7 +296,7 @@ th_prompts = [
     "คุณเคยพบกับความเปลี่ยนแปลงในประเทศไทยในช่วง 5 ปีที่ผ่านมาหรือไม่? ถ้าเคยคุณคิดว่ามีอะไรที่ทำให้คุณประทับใจ?",
 ]
 
-id_prompts = [
+prompts["id"] = [
     "Ceritakan tentang seorang anak desa yang menemukan sebuah lampu ajaib saat bermain di tepian sungai.",
     "Apa pendapat Anda tentang pengaruh media sosial terhadap remaja di Indonesia saat ini?",
     "Tulislah surat resmi kepada kepala sekolah untuk meminta izin menggunakan aula untuk kegiatan ekstrakurikuler.",
@@ -307,7 +309,7 @@ id_prompts = [
     "Tuliskan refleksi pribadi Anda tentang peran pendidikan dalam mengubah masa depan generasi muda di Indonesia.",
 ]
 
-ms_prompts = [
+prompts["ms"] = [
     "Tulis sebuah cerita pendek tentang seorang nelayan yang menemukan pesan dalam botol saat melaut.",
     "Apakah pandangan anda mengenai impak teknologi terhadap pendidikan di Malaysia?",
     "Huraikan suasana di Jalan Alor, Kuala Lumpur pada waktu malam.",
@@ -322,13 +324,34 @@ ms_prompts = [
 
 
 @click.command()
-@click.option("--max-new-tokens", default=64, help="Maximum number of tokens to generate. Set to 0 to ignore.")
+@click.option(
+    "--max-new-tokens",
+    default=64,
+    help="Maximum number of tokens to generate. Set to 0 to ignore.",
+)
 @click.option(
     "--model-name",
     default="Qwen/Qwen2-7B-Instruct",
     help="Name of the model for which to measure the amount of tokens per language.",
 )
-def main(max_new_tokens, model_name):
+@click.option(
+    "--english-only",
+    is_flag=True,
+    help="If specified, treat non-English languages as one and only produce results for English and non-English.",
+)
+@click.option(
+    "--language",
+    "-l",
+    "languages",
+    multiple=True,
+    help="Language code for which to produce results. English is always included. Multiple languages can be specified.",
+)
+def main(
+    max_new_tokens,
+    model_name,
+    english_only,
+    languages,
+):
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     model = AutoModelForCausalLM.from_pretrained(model_name, device_map="auto")
 
@@ -338,13 +361,15 @@ def main(max_new_tokens, model_name):
 
     model.config.output_hidden_states = True
 
-    prompts = zh_prompts + vi_prompts + th_prompts + id_prompts + ms_prompts
+    if not languages:
+        languages = ['zh', 'vi', 'th', 'id', 'ms']
 
-    # candidate_langs = ['en', 'zh', 'es', 'ru', 'de', 'fr']
-    candidate_langs = ['en', 'zh', 'vi', 'th', 'id', 'ms']
+    candidate_langs = ['en'] + list(languages)
+
+    all_prompts = [prompt for language in candidate_langs for prompt in prompts[language]]
 
     lst_lang_distribution = []
-    for prompt in tqdm(prompts):
+    for prompt in tqdm(all_prompts):
         hidden_embed, hidden_embed_token_level, answer = Prompting(
             model,
             tokenizer,
@@ -353,19 +378,19 @@ def main(max_new_tokens, model_name):
         )
         lang_stats = layerwise_lang_stats(hidden_embed_token_level, candidate_langs)
 
-        # if only draw english and non-english
-        # lang_distribution = layerwise_lang_distribution_bi(lang_distribution)
-
-        lang_distribution = layerwise_lang_distribution(lang_stats, candidate_langs)
+        if english_only:
+            lang_distribution = layerwise_lang_distribution_bi(lang_distribution)
+        else:
+            lang_distribution = layerwise_lang_distribution(lang_stats, candidate_langs)
+        
         lst_lang_distribution.append(lang_distribution)
     
-    # if only draw english and non-english
-    # average_lang_distribution = average_layerwise_lang_distribution(lst_lang_distribution, candidate_langs=['en', 'non-en'])
-    # plot_lang_distribution(average_lang_distribution, candidate_langs=['en', 'non-en'])
-        
-    # if draw all languages independently
-    average_lang_distribution = average_layerwise_lang_distribution(lst_lang_distribution, candidate_langs)
-    plot_lang_distribution(average_lang_distribution, candidate_langs, model_name)
+    if english_only:
+        average_lang_distribution = average_layerwise_lang_distribution(lst_lang_distribution, candidate_langs=['en', 'non-en'])
+        plot_lang_distribution(average_lang_distribution, candidate_langs=['en', 'non-en'])
+    else:
+        average_lang_distribution = average_layerwise_lang_distribution(lst_lang_distribution, candidate_langs)
+        plot_lang_distribution(average_lang_distribution, candidate_langs, model_name)
 
     save_lang_distribution(average_lang_distribution, model_name)
 
