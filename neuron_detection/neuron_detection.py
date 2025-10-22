@@ -25,7 +25,6 @@ def Prompting(model, prompt, candidate_premature_layers):
     inputs = tokenizer(prompt, return_tensors="pt").to("cuda")
     hidden_states, outputs, activate_keys_fwd_up, activate_keys_fwd_down, activate_keys_q, activate_keys_k, activate_keys_v, activate_keys_o, layer_keys = model.generate(**{'input_ids':inputs.input_ids, 'max_new_tokens':1, 'candidate_premature_layers':candidate_premature_layers})
     hidden_embed = {}
-    # pdb.set_trace()
     for i, early_exit_layer in enumerate(candidate_premature_layers):
         hidden_embed[early_exit_layer] = tokenizer.decode(hidden_states[early_exit_layer][0])
         # knowledge_neurons_word[early_exit_layer] = tokenizer.decode(knowledge_neurons[early_exit_layer][0])
@@ -60,7 +59,6 @@ def main(argv):
     count = 0
 
     for prompt in tqdm(lines):
-        # print(prompt)
         try:
             hidden_embed, answer, activate_keys_fwd_up, activate_keys_fwd_down, activate_keys_q, activate_keys_k, activate_keys_v, _, _ = Prompting(model, prompt, candidate_premature_layers)
             activate_keys_set_fwd_up.append(activate_keys_fwd_up)
@@ -158,8 +156,6 @@ def main(argv):
         file.write(str(common_elements_dict_q) + '\n')
         file.write(str(common_elements_dict_k) + '\n')
         file.write(str(common_elements_dict_v) + '\n')
-
-
 
 
 if __name__ == "__main__":
