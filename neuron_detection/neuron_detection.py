@@ -38,17 +38,16 @@ def Prompting(model, prompt, candidate_premature_layers):
 def main(argv):
 
     lines = []
-    file_path = "./corpus_all/"+argv[0] + ".txt"
+
+    file_path = os.path.join("corpus_all", argv[0] + ".txt")
     with open(file_path, 'r') as file:
         lines = file.readlines()
     lines = [line.strip() for line in lines]
     lines = random.sample(lines, int(argv[1]))
 
-
     candidate_premature_layers = []
     for i in range(32):
         candidate_premature_layers.append(i)
-
 
     activate_keys_set_fwd_up = []
     activate_keys_set_fwd_down = []
@@ -72,14 +71,12 @@ def main(argv):
             print(count)
             print(e)
 
-
     # Initialize dictionary for common elements
     common_elements_dict_fwd_up = {}
     common_elements_dict_fwd_down = {}
     common_elements_dict_q = {}
     common_elements_dict_k = {}
     common_elements_dict_v = {}
-
 
     # Iterate through the keys of the first dictionary
     for key in activate_keys_set_fwd_up[0].keys():
@@ -93,7 +90,6 @@ def main(argv):
             common_elements_dict_fwd_up[key] = common_elements
     # print(common_elements_dict_fwd_up)
 
-
     for key in activate_keys_set_fwd_down[0].keys():
         # Check if the key exists in all dictionaries
         if all(key in d for d in activate_keys_set_fwd_down):
@@ -104,7 +100,6 @@ def main(argv):
             # Add common elements to the dictionary
             common_elements_dict_fwd_down[key] = common_elements
     # print(common_elements_dict_fwd_down)
-
 
     for key in activate_keys_set_q[0].keys():
         # Check if the key exists in all dictionaries
@@ -117,7 +112,6 @@ def main(argv):
             common_elements_dict_q[key] = common_elements
     # print(common_elements_dict_q)
 
-
     for key in activate_keys_set_k[0].keys():
         # Check if the key exists in all dictionaries
         if all(key in d for d in activate_keys_set_k):
@@ -128,7 +122,6 @@ def main(argv):
             # Add common elements to the dictionary
             common_elements_dict_k[key] = common_elements
     # print(common_elements_dict_k)
-
 
     for key in activate_keys_set_v[0].keys():
         # Check if the key exists in all dictionaries
