@@ -4,7 +4,6 @@ import collections
 import logging
 import pickle
 import random
-import sys
 import torch
 from typing import Optional
 

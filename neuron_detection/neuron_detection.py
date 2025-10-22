@@ -1,27 +1,18 @@
-import os
-from dataclasses import field, dataclass
-from typing import Optional, Any
-import transformers
-from rouge_score import rouge_scorer
-import random
-from itertools import groupby
-import pdb
-import re
-import sys
-from tqdm import tqdm
-from typing import List
 import logging
-logging.basicConfig(level=logging.INFO)
-import torch
-import json
+import os
+import random
+import sys
+
+from tqdm import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer
-from datasets import load_dataset
-import csv
+
+
+logging.basicConfig(level=logging.INFO)
 
 random.seed(112)
 
 
-model_name = "meta-llama/Meta-Llama-3-8B"
+model_name = "mistralai/Mistral-7B-Instruct-v0.2"
 
 
 tokenizer = AutoTokenizer.from_pretrained(model_name)
