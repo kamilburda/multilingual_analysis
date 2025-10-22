@@ -1,8 +1,8 @@
 import logging
 import os
 import random
-import sys
 
+import click
 from tqdm import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
@@ -21,23 +21,51 @@ def Prompting(model, tokenizer, prompt, candidate_premature_layers):
     return hidden_embed, answer, activate_keys_fwd_up, activate_keys_fwd_down, activate_keys_q, activate_keys_k, activate_keys_v, activate_keys_o, layer_keys
 
 
-def main(argv):
+@click.command()
+@click.option(
+    "--language-corpus",
+    default="english",
+    help="Language for which to load a corpus.",
+)
+@click.option(
+    "--corpus-sample-size",
+    default=1000,
+    help="Number of documents to sample from the corpus given by --language-corpus.",
+)
+@click.option(
+    "--model-name",
+    default="mistralai/Mistral-7B-Instruct-v0.2",
+    help="Name of the model for which to detect language-specific neurons.",
+)
+@click.option(
+    "--random-seed",
+    default=112,
+    help=(
+        "Fixed random seed for sampling from the corpus given by --language-corpus."
+        " If you do not wish to use a fixed random seed, use -1."
+    ),
+)
+def main(
+    language_corpus,
+    corpus_sample_size,
+    model_name,
+    random_seed,
+):
     logging.basicConfig(level=logging.INFO)
 
-    random.seed(112)
-
-    model_name = "mistralai/Mistral-7B-Instruct-v0.2"
+    if random_seed != -1:
+        random.seed(random_seed)
 
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     model = AutoModelForCausalLM.from_pretrained(model_name, device_map="auto")
 
     lines = []
 
-    file_path = os.path.join("corpus_all", argv[0] + ".txt")
+    file_path = os.path.join("corpus_all", language_corpus + ".txt")
     with open(file_path, 'r') as file:
         lines = file.readlines()
     lines = [line.strip() for line in lines]
-    lines = random.sample(lines, int(argv[1]))
+    lines = random.sample(lines, corpus_sample_size)
 
     candidate_premature_layers = []
     for i in range(32):
@@ -136,8 +164,8 @@ def main(argv):
     file_path = os.path.join(
         "output_neurons",
         *model_name.split('/'),
-        argv[0],
-        "gsm_2000_12000_" + str(int(argv[1]) - count) + ".txt",
+        language_corpus,
+        "gsm_2000_12000_" + str(corpus_sample_size - count) + ".txt",
     )
 
     os.makedirs(os.path.dirname(file_path), exist_ok=True)
@@ -151,5 +179,4 @@ def main(argv):
 
 
 if __name__ == "__main__":
-    main(sys.argv[1:])
-
+    main()
