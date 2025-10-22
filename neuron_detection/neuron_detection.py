@@ -7,21 +7,7 @@ from tqdm import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 
-logging.basicConfig(level=logging.INFO)
-
-random.seed(112)
-
-
-model_name = "mistralai/Mistral-7B-Instruct-v0.2"
-
-
-tokenizer = AutoTokenizer.from_pretrained(model_name)
-model = AutoModelForCausalLM.from_pretrained(model_name, device_map="auto")
-
-
-
-def Prompting(model, prompt, candidate_premature_layers):
-    
+def Prompting(model, tokenizer, prompt, candidate_premature_layers):
     inputs = tokenizer(prompt, return_tensors="pt").to("cuda")
     hidden_states, outputs, activate_keys_fwd_up, activate_keys_fwd_down, activate_keys_q, activate_keys_k, activate_keys_v, activate_keys_o, layer_keys = model.generate(**{'input_ids':inputs.input_ids, 'max_new_tokens':1, 'candidate_premature_layers':candidate_premature_layers})
     hidden_embed = {}
@@ -36,6 +22,14 @@ def Prompting(model, prompt, candidate_premature_layers):
 
 
 def main(argv):
+    logging.basicConfig(level=logging.INFO)
+
+    random.seed(112)
+
+    model_name = "mistralai/Mistral-7B-Instruct-v0.2"
+
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    model = AutoModelForCausalLM.from_pretrained(model_name, device_map="auto")
 
     lines = []
 
@@ -59,7 +53,12 @@ def main(argv):
 
     for prompt in tqdm(lines):
         try:
-            hidden_embed, answer, activate_keys_fwd_up, activate_keys_fwd_down, activate_keys_q, activate_keys_k, activate_keys_v, _, _ = Prompting(model, prompt, candidate_premature_layers)
+            hidden_embed, answer, activate_keys_fwd_up, activate_keys_fwd_down, activate_keys_q, activate_keys_k, activate_keys_v, _, _ = Prompting(
+                model,
+                tokenizer,
+                prompt,
+                candidate_premature_layers,
+            )
             activate_keys_set_fwd_up.append(activate_keys_fwd_up)
             activate_keys_set_fwd_down.append(activate_keys_fwd_down)
             activate_keys_set_q.append(activate_keys_q)
