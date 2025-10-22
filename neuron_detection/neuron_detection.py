@@ -143,9 +143,14 @@ def main(argv):
             common_elements_dict_v[key] = common_elements
     # print(common_elements_dict_v)
 
+    file_path = os.path.join(
+        "output_neurons",
+        *model_name.split('/'),
+        argv[0],
+        "gsm_2000_12000_" + str(int(argv[1]) - count) + ".txt",
+    )
 
-
-    file_path = "./output_neurons/" + model_name + argv[0] + "gsm_2000_12000_"+str(int(argv[1])-count)+".txt"
+    os.makedirs(os.path.dirname(file_path), exist_ok=True)
 
     with open(file_path, 'w') as file:
         file.write(str(common_elements_dict_fwd_up) + '\n')
