@@ -14,11 +14,6 @@ from tqdm import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 
-logging.basicConfig(level=logging.INFO)
-
-random.seed(112)
-
-
 def tracefunc(frame, event, arg, indent=[0]):
     if event == "call":
         indent[0] += 2
@@ -345,12 +340,21 @@ prompts["ms"] = [
     multiple=True,
     help="Language code for which to produce results. English is always included. Multiple languages can be specified.",
 )
+@click.option(
+    "--random-seed",
+    default=112,
+)
 def main(
     max_new_tokens,
     model_name,
     english_only,
     languages,
+    random_seed,
 ):
+    logging.basicConfig(level=logging.INFO)
+
+    random.seed(random_seed)
+
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     model = AutoModelForCausalLM.from_pretrained(model_name, device_map="auto")
 
