@@ -21,46 +21,13 @@ def Prompting(model, tokenizer, prompt, candidate_premature_layers):
     return hidden_embed, answer, activate_keys_fwd_up, activate_keys_fwd_down, activate_keys_q, activate_keys_k, activate_keys_v, activate_keys_o, layer_keys
 
 
-@click.command()
-@click.option(
-    "--language-corpus",
-    default="english",
-    help="Language for which to load a corpus.",
-)
-@click.option(
-    "--corpus-sample-size",
-    default=1000,
-    help="Number of documents to sample from the corpus given by --language-corpus.",
-)
-@click.option(
-    "--model-name",
-    default="mistralai/Mistral-7B-Instruct-v0.2",
-    help="Name of the model for which to detect language-specific neurons.",
-)
-@click.option(
-    "--random-seed",
-    default=112,
-    help=(
-        "Fixed random seed for sampling from the corpus given by --language-corpus."
-        " If you do not wish to use a fixed random seed, use -1."
-    ),
-)
-def main(
-    language_corpus,
-    corpus_sample_size,
-    model_name,
-    random_seed,
+def _detect_neurons(
+        model_name,
+        model,
+        tokenizer,
+        language_corpus,
+        corpus_sample_size,
 ):
-    logging.basicConfig(level=logging.INFO)
-
-    if random_seed != -1:
-        random.seed(random_seed)
-
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
-    model = AutoModelForCausalLM.from_pretrained(model_name, device_map="auto")
-
-    lines = []
-
     file_path = os.path.join("corpus_all", language_corpus + ".txt")
     with open(file_path, 'r') as file:
         lines = file.readlines()
@@ -176,6 +143,51 @@ def main(
         file.write(str(common_elements_dict_q) + '\n')
         file.write(str(common_elements_dict_k) + '\n')
         file.write(str(common_elements_dict_v) + '\n')
+
+
+@click.command()
+@click.option(
+    "--language-corpus",
+    "-c",
+    "language_corpora",
+    default=["english"],
+    multiple=True,
+    help="Language(s) for which to load a corpus.",
+)
+@click.option(
+    "--corpus-sample-size",
+    default=1000,
+    help="Number of documents to sample from the corpus given by --language-corpus.",
+)
+@click.option(
+    "--model-name",
+    default="mistralai/Mistral-7B-Instruct-v0.2",
+    help="Name of the model for which to detect language-specific neurons.",
+)
+@click.option(
+    "--random-seed",
+    default=112,
+    help=(
+        "Fixed random seed for sampling from the corpus given by --language-corpus."
+        " If you do not wish to use a fixed random seed, use -1."
+    ),
+)
+def main(
+    language_corpora,
+    corpus_sample_size,
+    model_name,
+    random_seed,
+):
+    logging.basicConfig(level=logging.INFO)
+
+    if random_seed != -1:
+        random.seed(random_seed)
+
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    model = AutoModelForCausalLM.from_pretrained(model_name, device_map="auto")
+
+    for language_corpus in language_corpora:
+        _detect_neurons(model_name, model, tokenizer, language_corpus, corpus_sample_size)    
 
 
 if __name__ == "__main__":
