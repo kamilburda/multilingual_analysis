@@ -153,17 +153,9 @@ class MistralMLP(nn.Module):
         self.down_proj = nn.Linear(self.intermediate_size, self.hidden_size, bias=False)
         self.act_fn = ACT2FN[config.hidden_act]
 
-    def forward(self, hidden_state, early_layers):
+    def forward(self, hidden_state):
         real_output = self.down_proj(self.act_fn(self.gate_proj(hidden_state)) * self.up_proj(hidden_state))
-
-        # return self.down_proj(self.act_fn(self.gate_proj(hidden_state)) * self.up_proj(hidden_state))
-
-        if early_layers:
-
-            return real_output, torch.sum(torch.abs(self.up_proj(hidden_state)), dim=1).squeeze().tolist(), torch.sum(torch.abs(self.up_proj(hidden_state)), dim=1).squeeze().tolist()
-        else:
-            return real_output, [], []
-
+        return real_output, torch.sum(torch.abs(self.up_proj(hidden_state)), dim=1).squeeze().tolist(), torch.sum(torch.abs(self.up_proj(hidden_state)), dim=1).squeeze().tolist()
 
 
 # Copied from transformers.models.llama.modeling_llama.repeat_kv
@@ -226,7 +218,6 @@ class MistralAttention(nn.Module):
         output_attentions: bool = False,
         use_cache: bool = False,
         cache_position: Optional[torch.LongTensor] = None,
-        early_layers: bool = False,
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Tuple[torch.Tensor]]]:
         bsz, q_len, _ = hidden_states.size()
 
@@ -250,17 +241,15 @@ class MistralAttention(nn.Module):
         value_states = repeat_kv(value_states, self.num_key_value_groups)
 
         attn_weights = torch.matmul(query_states, key_states.transpose(2, 3)) / math.sqrt(self.head_dim)
-        attn_weights_temp = torch.matmul(query_states.transpose(2,3).unsqueeze(-1), key_states.transpose(2,3).unsqueeze(-1).transpose(-2,-1))
-
+        attn_weights_temp = torch.matmul(query_states.transpose(2, 3).unsqueeze(-1), key_states.transpose(2, 3).unsqueeze(-1).transpose(-2, -1))
 
         if attention_mask is not None:  # no matter the length, we just slice it
             causal_mask = attention_mask[:, :, :, : key_states.shape[-2]]
             attn_weights = attn_weights + causal_mask
             attn_weights_temp = attn_weights_temp + attention_mask.unsqueeze(2)
 
-        attn_weights_temp = attn_weights.unsqueeze(2).expand(-1,-1,query_states.size()[-1],-1,-1) - attn_weights_temp
+        attn_weights_temp = attn_weights.unsqueeze(2).expand(-1, -1, query_states.size()[-1], -1, -1) - attn_weights_temp
         attn_weights_temp = nn.functional.softmax(attn_weights_temp, dim=-1, dtype=torch.float32).to(query_states.dtype)
-
 
         # upcast attention to fp32
         attn_weights = nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32).to(query_states.dtype)
@@ -273,8 +262,8 @@ class MistralAttention(nn.Module):
                 f" {attn_output.size()}"
             )
 
-        attn_weights_temp = attn_weights_temp - attn_weights.unsqueeze(2).expand(-1,-1,query_states.size()[-1],-1,-1)
-        attn_weights_temp = attn_weights_temp**2
+        attn_weights_temp = attn_weights_temp - attn_weights.unsqueeze(2).expand(-1, -1, query_states.size()[-1], -1, -1)
+        attn_weights_temp = attn_weights_temp ** 2
         attn_weights_temp = attn_weights_temp.sum(dim=(-2, -1)).view(-1)
 
         attn_output = attn_output.transpose(1, 2).contiguous()
@@ -294,10 +283,7 @@ class MistralAttention(nn.Module):
         attn_output_temp_score = torch.sum(torch.abs(attn_output_temp), dim=1).squeeze().tolist()
         o_score = torch.sum(torch.abs(attn_output_o), dim=1).squeeze().tolist()
 
-        if early_layers:
-            return attn_output, attn_weights, past_key_value, query_score, key_score, attn_output_temp_score, o_score
-        else:
-            return attn_output, attn_weights, past_key_value, [], [], []
+        return attn_output, attn_weights, past_key_value, query_score, key_score, attn_output_temp_score, o_score
 
 
 class MistralFlashAttention2(MistralAttention):
@@ -554,7 +540,6 @@ class MistralDecoderLayer(nn.Module):
         output_attentions: Optional[bool] = False,
         use_cache: Optional[bool] = False,
         cache_position: Optional[torch.LongTensor] = None,
-        early_layers: bool = False,
         **kwargs,
     ) -> Tuple[torch.FloatTensor, Optional[Tuple[torch.FloatTensor, torch.FloatTensor]]]:
         """
@@ -589,7 +574,6 @@ class MistralDecoderLayer(nn.Module):
             output_attentions=output_attentions,
             use_cache=use_cache,
             cache_position=cache_position,
-            early_layers = early_layers,
             **kwargs,
         )
         hidden_states = residual + hidden_states
@@ -597,7 +581,7 @@ class MistralDecoderLayer(nn.Module):
         # Fully Connected
         residual = hidden_states
         hidden_states = self.post_attention_layernorm(hidden_states)
-        hidden_states,  hidden_score_fwd_up, hidden_score_fwd_down = self.mlp(hidden_states,early_layers = early_layers)
+        hidden_states, hidden_score_fwd_up, hidden_score_fwd_down = self.mlp(hidden_states)
         hidden_states = residual + hidden_states
 
         outputs = (hidden_states,)
@@ -772,7 +756,6 @@ class MistralModel(MistralPreTrainedModel):
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
         cache_position: Optional[torch.LongTensor] = None,
-        early_exit_layers: Optional[List[int]] = None,
     ) -> Union[Tuple, BaseModelOutputWithPast]:
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
         output_hidden_states = (
@@ -835,11 +818,6 @@ class MistralModel(MistralPreTrainedModel):
 
 
         for idx, decoder_layer in enumerate(self.layers):
-            if idx in early_exit_layers:
-                early_layers_flag = True
-            else:
-                early_layers_flag = False
-            
             if output_hidden_states:
                 all_hidden_states += (hidden_states,)
 
@@ -863,16 +841,14 @@ class MistralModel(MistralPreTrainedModel):
                     output_attentions=output_attentions,
                     use_cache=use_cache,
                     cache_position=cache_position,
-                    early_layers=early_layers_flag,
                 )
 
-            if early_layers_flag:
-                hidden_scores_fwd_up[idx] = hidden_score_fwd_up
-                hidden_scores_fwd_down[idx] = hidden_score_fwd_down
-                hidden_scores_q[idx] = hidden_score_q
-                hidden_scores_k[idx] = hidden_score_k
-                hidden_scores_v[idx] = hidden_score_v
-                hidden_scores_o[idx] = hidden_score_o
+            hidden_scores_fwd_up[idx] = hidden_score_fwd_up
+            hidden_scores_fwd_down[idx] = hidden_score_fwd_down
+            hidden_scores_q[idx] = hidden_score_q
+            hidden_scores_k[idx] = hidden_score_k
+            hidden_scores_v[idx] = hidden_score_v
+            hidden_scores_o[idx] = hidden_score_o
 
             hidden_states = layer_outputs[0]
 
@@ -1055,7 +1031,6 @@ class MistralForCausalLM(MistralPreTrainedModel):
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
         cache_position: Optional[torch.LongTensor] = None,
-        early_exit_layers: Optional[List[int]] = None,
     ) -> Union[Tuple, CausalLMOutputWithPast]:
         r"""
         Args:
@@ -1098,123 +1073,87 @@ class MistralForCausalLM(MistralPreTrainedModel):
             inputs_embeds=inputs_embeds,
             use_cache=use_cache,
             output_attentions=output_attentions,
-            output_hidden_states=output_hidden_states or early_exit_layers is not None,
+            output_hidden_states=True,
             return_dict=return_dict,
             cache_position=cache_position,
-            early_exit_layers = early_exit_layers,
         )
 
+        summed_data_fwd = {key: sum(value) for key, value in hidden_scores_fwd_up.items()}
+        sorted_items_fwd = sorted(summed_data_fwd.items(), key=lambda item: item[1])
+        summed_data_q = {key: sum(value) for key, value in hidden_score_q.items()}
+        sorted_items_q = sorted(summed_data_q.items(), key=lambda item: item[1])
+        summed_data_k = {key: sum(value) for key, value in hidden_score_k.items()}
+        sorted_items_k = sorted(summed_data_k.items(), key=lambda item: item[1])
+        summed_data_v = {key: sum(value) for key, value in hidden_score_v.items()}
+        sorted_items_v = sorted(summed_data_v.items(), key=lambda item: item[1])
+        summed_data_o = {key: sum(value) for key, value in hidden_score_o.items()}
+        sorted_items_o = sorted(summed_data_o.items(), key=lambda item: item[1])
 
-        if early_exit_layers is not None:
-            summed_data_fwd = {key: sum(value) for key, value in hidden_scores_fwd_up.items()}
-            sorted_items_fwd = sorted(summed_data_fwd.items(), key=lambda item: item[1])
-            summed_data_q = {key: sum(value) for key, value in hidden_score_q.items()}
-            sorted_items_q = sorted(summed_data_q.items(), key=lambda item: item[1])
-            summed_data_k = {key: sum(value) for key, value in hidden_score_k.items()}
-            sorted_items_k = sorted(summed_data_k.items(), key=lambda item: item[1])
-            summed_data_v = {key: sum(value) for key, value in hidden_score_v.items()}
-            sorted_items_v = sorted(summed_data_v.items(), key=lambda item: item[1])
-            summed_data_o = {key: sum(value) for key, value in hidden_score_o.items()}
-            sorted_items_o = sorted(summed_data_o.items(), key=lambda item: item[1])
+        combined_data = {key: summed_data_fwd[key]*3 + summed_data_q[key]*2 + summed_data_v[key]*2 for key in summed_data_fwd}
 
-            combined_data = {key: summed_data_fwd[key]*3 + summed_data_q[key]*2 + summed_data_v[key]*2 for key in summed_data_fwd}
+        # pdb.set_trace()
+        
+        logits_dict = {}
+        activate_keys_fwd_up = {}
+        activate_keys_fwd_down = {}
+        activate_keys_q = {}
+        activate_keys_k = {}
+        activate_keys_v = {}
+        activate_keys_o = {}
 
+        for early_exit_layer in range(len(outputs.hidden_states)):
+            logits = self.lm_head(outputs.hidden_states[early_exit_layer])
+            logits_dict[early_exit_layer] = logits
+            top_number_attn = 1000
+            top_number_ffn = 2000
+            top_number_layer = 24
             # pdb.set_trace()
-            
-            logits_dict = {}
-            activate_keys_fwd_up = {}
-            activate_keys_fwd_down = {}
-            activate_keys_q = {}
-            activate_keys_k = {}
-            activate_keys_v = {}
-            activate_keys_o = {}
+            # top_indices = operator.itemgetter(*(np.argsort(hidden_scores_fwd_up[early_exit_layer])[-top_number:][::-1]).tolist())(hidden_scores_fwd_up[early_exit_layer])
+            top_indices = np.argsort(hidden_scores_fwd_up[early_exit_layer])[-top_number_ffn:][::-1]
+            activate_keys_fwd_up[early_exit_layer] = top_indices
+            # top_indices = operator.itemgetter(*(np.argsort(hidden_scores_fwd_down[early_exit_layer])[-top_number:][::-1]).tolist())(hidden_scores_fwd_down[early_exit_layer])
+            top_indices = np.argsort(hidden_scores_fwd_down[early_exit_layer])[-top_number_ffn:][::-1]
+            activate_keys_fwd_down[early_exit_layer] = top_indices
+            # top_indices = operator.itemgetter(*(np.argsort(hidden_score_q[early_exit_layer])[-top_number:][::-1]).tolist())(hidden_score_q[early_exit_layer])
+            top_indices = np.argsort(hidden_score_q[early_exit_layer])[-top_number_attn:][::-1]
+            activate_keys_q[early_exit_layer] = top_indices
+            # top_indices = operator.itemgetter(*(np.argsort(hidden_score_k[early_exit_layer])[-top_number:][::-1]).tolist())(hidden_score_k[early_exit_layer])
+            top_indices = np.argsort(hidden_score_k[early_exit_layer])[-top_number_attn:][::-1]
+            activate_keys_k[early_exit_layer] = top_indices
+            # top_indices = operator.itemgetter(*(np.argsort(hidden_score_v[early_exit_layer])[-top_number:][::-1]).tolist())(hidden_score_v[early_exit_layer])
+            top_indices = np.argsort(hidden_score_v[early_exit_layer])[-top_number_attn:][::-1]
+            activate_keys_v[early_exit_layer] = top_indices
+            top_indices = np.argsort(hidden_score_o[early_exit_layer])[-top_number_attn:][::-1]
+            activate_keys_o[early_exit_layer] = top_indices
+            sorted_items = sorted(combined_data.items(), key=lambda item: item[1])
+            no_use_layer_index = [item[0] for item in sorted_items[-top_number_layer:]]
 
-            for i, early_exit_layer in enumerate(early_exit_layers):
-                logits = self.lm_head(outputs.hidden_states[early_exit_layer])
-                logits_dict[early_exit_layer] = logits
-                top_number_attn = 1000
-                top_number_ffn = 2000
-                top_number_layer = 24
-                # pdb.set_trace()
-                # top_indices = operator.itemgetter(*(np.argsort(hidden_scores_fwd_up[early_exit_layer])[-top_number:][::-1]).tolist())(hidden_scores_fwd_up[early_exit_layer])
-                top_indices = np.argsort(hidden_scores_fwd_up[early_exit_layer])[-top_number_ffn:][::-1]
-                activate_keys_fwd_up[early_exit_layer] = top_indices
-                # top_indices = operator.itemgetter(*(np.argsort(hidden_scores_fwd_down[early_exit_layer])[-top_number:][::-1]).tolist())(hidden_scores_fwd_down[early_exit_layer])
-                top_indices = np.argsort(hidden_scores_fwd_down[early_exit_layer])[-top_number_ffn:][::-1]
-                activate_keys_fwd_down[early_exit_layer] = top_indices
-                # top_indices = operator.itemgetter(*(np.argsort(hidden_score_q[early_exit_layer])[-top_number:][::-1]).tolist())(hidden_score_q[early_exit_layer])
-                top_indices = np.argsort(hidden_score_q[early_exit_layer])[-top_number_attn:][::-1]
-                activate_keys_q[early_exit_layer] = top_indices
-                # top_indices = operator.itemgetter(*(np.argsort(hidden_score_k[early_exit_layer])[-top_number:][::-1]).tolist())(hidden_score_k[early_exit_layer])
-                top_indices = np.argsort(hidden_score_k[early_exit_layer])[-top_number_attn:][::-1]
-                activate_keys_k[early_exit_layer] = top_indices
-                # top_indices = operator.itemgetter(*(np.argsort(hidden_score_v[early_exit_layer])[-top_number:][::-1]).tolist())(hidden_score_v[early_exit_layer])
-                top_indices = np.argsort(hidden_score_v[early_exit_layer])[-top_number_attn:][::-1]
-                activate_keys_v[early_exit_layer] = top_indices
-                top_indices = np.argsort(hidden_score_o[early_exit_layer])[-top_number_attn:][::-1]
-                activate_keys_o[early_exit_layer] = top_indices
-                sorted_items = sorted(combined_data.items(), key=lambda item: item[1])
-                no_use_layer_index = [item[0] for item in sorted_items[-top_number_layer:]]
+        loss = None
+        if labels is not None:
+            # Shift so that tokens < n predict n
+            shift_logits = logits[..., :-1, :].contiguous()
+            shift_labels = labels[..., 1:].contiguous()
+            # Flatten the tokens
+            shift_logits = shift_logits.view(-1, self.config.vocab_size)
+            shift_labels = shift_labels.view(-1)
+            # Ensure tensors are on the same device
+            shift_labels = shift_labels.to(shift_logits.device)
+            loss_fct = CrossEntropyLoss()
+            loss = loss_fct(shift_logits, shift_labels)
 
-            
+        if not return_dict:
+            output = (logits,) + outputs[1:]
+            return (loss,) + output if loss is not None else output
 
-            loss = None
-            if labels is not None:
-                # Shift so that tokens < n predict n
-                shift_logits = logits[..., :-1, :].contiguous()
-                shift_labels = labels[..., 1:].contiguous()
-                # Flatten the tokens
-                shift_logits = shift_logits.view(-1, self.config.vocab_size)
-                shift_labels = shift_labels.view(-1)
-                # Ensure tensors are on the same device
-                shift_labels = shift_labels.to(shift_logits.device)
-                loss_fct = CrossEntropyLoss()
-                loss = loss_fct(shift_logits, shift_labels)
+        final_outputs = CausalLMOutputWithPast(
+            loss=loss,
+            logits=logits,
+            past_key_values=outputs.past_key_values,
+            hidden_states=outputs.hidden_states,
+            attentions=outputs.attentions,
+        )
 
-            if not return_dict:
-                output = (logits,) + outputs[1:]
-                return (loss,) + output if loss is not None else output
-
-            final_outputs = CausalLMOutputWithPast(
-                loss=loss,
-                logits=logits,
-                past_key_values=outputs.past_key_values,
-                hidden_states=outputs.hidden_states,
-                attentions=outputs.attentions,
-            )
-
-
-            return logits_dict, final_outputs, activate_keys_fwd_up, activate_keys_fwd_down, activate_keys_q, activate_keys_k, activate_keys_v, activate_keys_o, no_use_layer_index
-
-        else:
-            hidden_states = outputs[0]
-            logits = self.lm_head(hidden_states)
-            logits = logits.float()
-
-            loss = None
-            if labels is not None:
-                # Shift so that tokens < n predict n
-                shift_logits = logits[..., :-1, :].contiguous()
-                shift_labels = labels[..., 1:].contiguous()
-                # Flatten the tokens
-                loss_fct = CrossEntropyLoss()
-                shift_logits = shift_logits.view(-1, self.config.vocab_size)
-                shift_labels = shift_labels.view(-1)
-                # Enable model parallelism
-                shift_labels = shift_labels.to(shift_logits.device)
-                loss = loss_fct(shift_logits, shift_labels)
-
-            if not return_dict:
-                output = (logits,) + outputs[1:]
-                return (loss,) + output if loss is not None else output
-
-            return CausalLMOutputWithPast(
-                loss=loss,
-                logits=logits,
-                past_key_values=outputs.past_key_values,
-                hidden_states=outputs.hidden_states,
-                attentions=outputs.attentions,
-            )
+        return logits_dict, final_outputs, activate_keys_fwd_up, activate_keys_fwd_down, activate_keys_q, activate_keys_k, activate_keys_v, activate_keys_o, no_use_layer_index
 
     def prepare_inputs_for_generation(
         self,
