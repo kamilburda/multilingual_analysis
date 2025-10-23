@@ -1079,15 +1079,8 @@ class MistralForCausalLM(MistralPreTrainedModel):
         )
 
         summed_data_fwd = {key: sum(value) for key, value in hidden_scores_fwd_up.items()}
-        sorted_items_fwd = sorted(summed_data_fwd.items(), key=lambda item: item[1])
         summed_data_q = {key: sum(value) for key, value in hidden_score_q.items()}
-        sorted_items_q = sorted(summed_data_q.items(), key=lambda item: item[1])
-        summed_data_k = {key: sum(value) for key, value in hidden_score_k.items()}
-        sorted_items_k = sorted(summed_data_k.items(), key=lambda item: item[1])
         summed_data_v = {key: sum(value) for key, value in hidden_score_v.items()}
-        sorted_items_v = sorted(summed_data_v.items(), key=lambda item: item[1])
-        summed_data_o = {key: sum(value) for key, value in hidden_score_o.items()}
-        sorted_items_o = sorted(summed_data_o.items(), key=lambda item: item[1])
 
         combined_data = {key: summed_data_fwd[key]*3 + summed_data_q[key]*2 + summed_data_v[key]*2 for key in summed_data_fwd}
 
