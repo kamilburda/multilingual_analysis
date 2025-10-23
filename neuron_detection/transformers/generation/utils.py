@@ -2263,7 +2263,6 @@ class GenerationMixin:
                 return_dict=True,
                 output_attentions=output_attentions,
                 output_hidden_states=output_hidden_states,
-                early_exit_layers=early_exit_layers,
             )
 
             if synced_gpus and this_peer_finished:

@@ -1101,7 +1101,7 @@ class MistralForCausalLM(MistralPreTrainedModel):
         activate_keys_v = {}
         activate_keys_o = {}
 
-        for early_exit_layer in range(len(outputs.hidden_states)):
+        for early_exit_layer in range(len(self.model.layers)):
             logits = self.lm_head(outputs.hidden_states[early_exit_layer])
             logits_dict[early_exit_layer] = logits
             top_number_attn = 1000
