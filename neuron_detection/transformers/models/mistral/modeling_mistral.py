@@ -217,7 +217,7 @@ class MistralAttention(nn.Module):
             base=self.rope_theta,
         )
 
-    def share_forward(
+    def forward(
         self,
         hidden_states: torch.Tensor,
         attention_mask: Optional[torch.Tensor] = None,
@@ -226,6 +226,7 @@ class MistralAttention(nn.Module):
         output_attentions: bool = False,
         use_cache: bool = False,
         cache_position: Optional[torch.LongTensor] = None,
+        early_layers: bool = False,
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Tuple[torch.Tensor]]]:
         bsz, q_len, _ = hidden_states.size()
 
@@ -288,40 +289,15 @@ class MistralAttention(nn.Module):
         if not output_attentions:
             attn_weights = None
 
-        return attn_output, attn_weights, past_key_value, attn_weights_temp.squeeze().tolist(), attn_weights_temp.squeeze().tolist(), attn_output_temp, torch.sum(torch.abs(attn_output_o), dim=1).squeeze().tolist()
-   
-    
-    def forward(
-        self,
-        hidden_states: torch.Tensor,
-        attention_mask: Optional[torch.Tensor] = None,
-        position_ids: Optional[torch.LongTensor] = None,
-        past_key_value: Optional[Tuple[torch.Tensor]] = None,
-        output_attentions: bool = False,
-        use_cache: bool = False,
-        cache_position: Optional[torch.LongTensor] = None,
-        early_layers: bool = False,
-    ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Tuple[torch.Tensor]]]:
-        bsz, q_len, _ = hidden_states.size()
-
-        # pdb.set_trace()
-
-        attn_output, attn_weights, past_key_value_real, query_score, key_score, attn_output_temp, o_score = self.share_forward(
-            hidden_states=hidden_states, 
-            attention_mask=attention_mask, 
-            position_ids = position_ids,
-            past_key_value = past_key_value,
-            output_attentions = output_attentions,
-            use_cache = use_cache,
-            )
+        query_score = attn_weights_temp.squeeze().tolist()
+        key_score = attn_weights_temp.squeeze().tolist()
+        attn_output_temp_score = torch.sum(torch.abs(attn_output_temp), dim=1).squeeze().tolist()
+        o_score = torch.sum(torch.abs(attn_output_o), dim=1).squeeze().tolist()
 
         if early_layers:
-        
-            return attn_output, attn_weights, past_key_value_real, query_score, key_score, torch.sum(torch.abs(attn_output_temp), dim=1).squeeze().tolist(), o_score
-                
+            return attn_output, attn_weights, past_key_value, query_score, key_score, attn_output_temp_score, o_score
         else:
-            return attn_output, attn_weights, past_key_value_real, [], [], []
-
+            return attn_output, attn_weights, past_key_value, [], [], []
 
 
 class MistralFlashAttention2(MistralAttention):

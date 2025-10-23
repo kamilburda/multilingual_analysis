@@ -2251,14 +2251,11 @@ class GenerationMixin:
             # prepare model inputs
             model_inputs = self.prepare_inputs_for_generation(input_ids, **model_kwargs)
 
-
             if candidate_premature_layers is not None:
                 early_exit_layers = candidate_premature_layers
             else:
                 raise ValueError("You must specify either `base_layer` or `candidate_premature_layers`")
         
-
-
             # forward pass to get next token
 
             logits_dict, outputs, activate_keys_fwd_up, activate_keys_fwd_down, activate_keys_q, activate_keys_k, activate_keys_v, activate_keys_o, layer_keys = self(
@@ -2268,14 +2265,6 @@ class GenerationMixin:
                 output_hidden_states=output_hidden_states,
                 early_exit_layers=early_exit_layers,
             )
-
-            # logits_dict, outputs, activate_keys_fwd_up, activate_keys_fwd_down, activate_keys_q, activate_keys_k, activate_keys_v = self(
-            #     **model_inputs,
-            #     return_dict=True,
-            #     output_attentions=output_attentions,
-            #     output_hidden_states=output_hidden_states,
-            #     early_exit_layers=early_exit_layers,
-            # )
 
             if synced_gpus and this_peer_finished:
                 continue  # don't waste resources running the code we don't need
