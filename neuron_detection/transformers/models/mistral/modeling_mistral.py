@@ -1094,30 +1094,30 @@ class MistralForCausalLM(MistralPreTrainedModel):
         activate_keys_v = {}
         activate_keys_o = {}
 
-        for early_exit_layer in range(len(self.model.layers)):
-            logits = self.lm_head(outputs.hidden_states[early_exit_layer])
-            logits_dict[early_exit_layer] = logits
+        for layer_index in range(len(self.model.layers)):
+            logits = self.lm_head(outputs.hidden_states[layer_index])
+            logits_dict[layer_index] = logits
             top_number_attn = 1000
             top_number_ffn = 2000
             top_number_layer = 24
             # pdb.set_trace()
             # top_indices = operator.itemgetter(*(np.argsort(hidden_scores_fwd_up[early_exit_layer])[-top_number:][::-1]).tolist())(hidden_scores_fwd_up[early_exit_layer])
-            top_indices = np.argsort(hidden_scores_fwd_up[early_exit_layer])[-top_number_ffn:][::-1]
-            activate_keys_fwd_up[early_exit_layer] = top_indices
+            top_indices = np.argsort(hidden_scores_fwd_up[layer_index])[-top_number_ffn:][::-1]
+            activate_keys_fwd_up[layer_index] = top_indices
             # top_indices = operator.itemgetter(*(np.argsort(hidden_scores_fwd_down[early_exit_layer])[-top_number:][::-1]).tolist())(hidden_scores_fwd_down[early_exit_layer])
-            top_indices = np.argsort(hidden_scores_fwd_down[early_exit_layer])[-top_number_ffn:][::-1]
-            activate_keys_fwd_down[early_exit_layer] = top_indices
+            top_indices = np.argsort(hidden_scores_fwd_down[layer_index])[-top_number_ffn:][::-1]
+            activate_keys_fwd_down[layer_index] = top_indices
             # top_indices = operator.itemgetter(*(np.argsort(hidden_score_q[early_exit_layer])[-top_number:][::-1]).tolist())(hidden_score_q[early_exit_layer])
-            top_indices = np.argsort(hidden_score_q[early_exit_layer])[-top_number_attn:][::-1]
-            activate_keys_q[early_exit_layer] = top_indices
+            top_indices = np.argsort(hidden_score_q[layer_index])[-top_number_attn:][::-1]
+            activate_keys_q[layer_index] = top_indices
             # top_indices = operator.itemgetter(*(np.argsort(hidden_score_k[early_exit_layer])[-top_number:][::-1]).tolist())(hidden_score_k[early_exit_layer])
-            top_indices = np.argsort(hidden_score_k[early_exit_layer])[-top_number_attn:][::-1]
-            activate_keys_k[early_exit_layer] = top_indices
+            top_indices = np.argsort(hidden_score_k[layer_index])[-top_number_attn:][::-1]
+            activate_keys_k[layer_index] = top_indices
             # top_indices = operator.itemgetter(*(np.argsort(hidden_score_v[early_exit_layer])[-top_number:][::-1]).tolist())(hidden_score_v[early_exit_layer])
-            top_indices = np.argsort(hidden_score_v[early_exit_layer])[-top_number_attn:][::-1]
-            activate_keys_v[early_exit_layer] = top_indices
-            top_indices = np.argsort(hidden_score_o[early_exit_layer])[-top_number_attn:][::-1]
-            activate_keys_o[early_exit_layer] = top_indices
+            top_indices = np.argsort(hidden_score_v[layer_index])[-top_number_attn:][::-1]
+            activate_keys_v[layer_index] = top_indices
+            top_indices = np.argsort(hidden_score_o[layer_index])[-top_number_attn:][::-1]
+            activate_keys_o[layer_index] = top_indices
             sorted_items = sorted(combined_data.items(), key=lambda item: item[1])
             no_use_layer_index = [item[0] for item in sorted_items[-top_number_layer:]]
 
