@@ -36,7 +36,6 @@ def Prompting(model, tokenizer, prompt):
 
 
     store_activated_neurons_handle = model.register_forward_hook(store_activated_neurons_hook)
-
     try:
         outputs = model.generate(
             input_ids=inputs.input_ids,
