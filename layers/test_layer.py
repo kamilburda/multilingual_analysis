@@ -54,14 +54,15 @@ def Prompting(
 
     store_hidden_states_handle = model.register_forward_hook(store_hidden_states_hook)
 
-    outputs = model.generate(
-        input_ids=inputs.input_ids,
-        max_new_tokens=max_new_tokens,
-        return_dict_in_generate=True,
-        output_hidden_states=True,
-    )
-
-    store_hidden_states_handle.remove()
+    try:
+        outputs = model.generate(
+            input_ids=inputs.input_ids,
+            max_new_tokens=max_new_tokens,
+            return_dict_in_generate=True,
+            output_hidden_states=True,
+        )
+    finally:
+        store_hidden_states_handle.remove()
 
     hidden_states = {}
     for layer_index in hidden_states_as_lists:
