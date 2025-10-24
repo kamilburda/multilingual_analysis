@@ -217,6 +217,12 @@ def main(
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     model = AutoModelForCausalLM.from_pretrained(model_name, device_map="auto")
 
+    # Force greedy search
+    model.generation_config.do_sample = False
+    model.generation_config.num_beams = 1
+
+    model.config.output_hidden_states = True
+
     for language_corpus in language_corpora:
         _detect_neurons(model_name, model, tokenizer, language_corpus, corpus_sample_size)    
 
