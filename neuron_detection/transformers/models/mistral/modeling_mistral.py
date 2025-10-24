@@ -1078,6 +1078,10 @@ class MistralForCausalLM(MistralPreTrainedModel):
             cache_position=cache_position,
         )
 
+        hidden_states = outputs[0]
+        logits = self.lm_head(hidden_states)
+        logits = logits.float()
+
         summed_data_fwd = {key: sum(value) for key, value in hidden_scores_fwd_up.items()}
         summed_data_q = {key: sum(value) for key, value in hidden_score_q.items()}
         summed_data_v = {key: sum(value) for key, value in hidden_score_v.items()}
@@ -1095,8 +1099,7 @@ class MistralForCausalLM(MistralPreTrainedModel):
         activate_keys_o = {}
 
         for layer_index in range(len(self.model.layers)):
-            logits = self.lm_head(outputs.hidden_states[layer_index])
-            logits_dict[layer_index] = logits
+            logits_dict[layer_index] = self.lm_head(outputs.hidden_states[layer_index]).float()
             top_number_attn = 1000
             top_number_ffn = 2000
             top_number_layer = 24
