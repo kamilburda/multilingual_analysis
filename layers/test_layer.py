@@ -364,8 +364,6 @@ def main(
     model.generation_config.do_sample = False
     model.generation_config.num_beams = 1
 
-    model.config.output_hidden_states = True
-
     if not languages:
         languages = ['zh', 'vi', 'th', 'id', 'ms']
 
