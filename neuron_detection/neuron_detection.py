@@ -92,7 +92,7 @@ def _detect_neurons(
             activate_keys_set_q.append(activate_keys_q)
             activate_keys_set_k.append(activate_keys_k)
             activate_keys_set_v.append(activate_keys_v)
-        except Exception as e:
+        except torch.cuda.OutOfMemoryError as e:
             count += 1
             # Handle the OutOfMemoryError here
             print(count)
