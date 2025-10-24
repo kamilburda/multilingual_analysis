@@ -39,6 +39,8 @@ def Prompting(
 
 
     def store_hidden_states_hook(model_, input_, output):
+        nonlocal hidden_states_as_lists
+
         logits_dict = {}
 
         for layer_index in range(len(output.hidden_states)):
