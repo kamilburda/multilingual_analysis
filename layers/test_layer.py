@@ -55,7 +55,6 @@ def Prompting(
 
 
     store_hidden_states_handle = model.register_forward_hook(store_hidden_states_hook)
-
     try:
         outputs = model.generate(
             input_ids=inputs.input_ids,
