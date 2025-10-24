@@ -40,6 +40,8 @@ def Prompting(model, tokenizer, prompt):
         outputs = model.generate(
             input_ids=inputs.input_ids,
             max_new_tokens=1,
+            return_dict_in_generate=True,
+            output_hidden_states=True,
         )
     finally:
         store_activated_neurons_handle.remove()
@@ -51,7 +53,7 @@ def Prompting(model, tokenizer, prompt):
     hidden_embed = {}
     for layer_index in range(len(model.model.layers)):
         hidden_embed[layer_index] = tokenizer.decode(hidden_states[layer_index][0])
-    answer = tokenizer.decode(outputs[0]).replace('<pad> ', '')
+    answer = tokenizer.decode(outputs[0][0]).replace('<pad> ', '')
     answer = answer.replace('</s>', '')
     
     return hidden_embed, answer, activate_keys_fwd_up, activate_keys_fwd_down, activate_keys_q, activate_keys_k, activate_keys_v, activate_keys_o, layer_keys
@@ -220,8 +222,6 @@ def main(
     # Force greedy search
     model.generation_config.do_sample = False
     model.generation_config.num_beams = 1
-
-    model.config.output_hidden_states = True
 
     for language_corpus in language_corpora:
         _detect_neurons(model_name, model, tokenizer, language_corpus, corpus_sample_size)    
