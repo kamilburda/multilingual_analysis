@@ -1,20 +1,57 @@
+import collections
 import logging
 import os
 import random
 
 import click
+import torch
 from tqdm import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 
-def Prompting(model, tokenizer, prompt, candidate_premature_layers):
+def Prompting(model, tokenizer, prompt):
     inputs = tokenizer(prompt, return_tensors="pt").to("cuda")
-    hidden_states, outputs, activate_keys_fwd_up, activate_keys_fwd_down, activate_keys_q, activate_keys_k, activate_keys_v, activate_keys_o, layer_keys = model.generate(**{'input_ids':inputs.input_ids, 'max_new_tokens':1, 'candidate_premature_layers':candidate_premature_layers})
+
+    hidden_states_as_lists = collections.defaultdict(list)
+    logits_dict = None
+    activate_keys_fwd_up = None
+    activate_keys_fwd_down = None
+    activate_keys_q = None
+    activate_keys_k = None
+    activate_keys_v = None
+    activate_keys_o = None
+    layer_keys = None
+
+
+    def store_activated_neurons_hook(model_, input_, output):
+        nonlocal hidden_states_as_lists, logits_dict, activate_keys_fwd_up, activate_keys_fwd_down, activate_keys_q, activate_keys_k, activate_keys_v, activate_keys_o, layer_keys
+
+        logits_dict, outputs, activate_keys_fwd_up, activate_keys_fwd_down, activate_keys_q, activate_keys_k, activate_keys_v, activate_keys_o, layer_keys = output
+
+        # TODO: This may not yield the same results as embedding this code inside `model._sample()` in case of multiple GPUs.
+        for layer_index, logit in logits_dict.items():
+            hidden_states_as_lists[layer_index].append(torch.argmax(logit, dim=-1))
+        
+        return outputs
+
+
+    store_activated_neurons_handle = model.register_forward_hook(store_activated_neurons_hook)
+
+    try:
+        outputs = model.generate(
+            input_ids=inputs.input_ids,
+            max_new_tokens=1,
+        )
+    finally:
+        store_activated_neurons_handle.remove()
+
+    hidden_states = {}
+    for layer_index in hidden_states_as_lists:
+        hidden_states[layer_index] = torch.cat(hidden_states_as_lists[layer_index], dim=-1)
+    
     hidden_embed = {}
-    for i, early_exit_layer in enumerate(candidate_premature_layers):
-        hidden_embed[early_exit_layer] = tokenizer.decode(hidden_states[early_exit_layer][0])
-        # knowledge_neurons_word[early_exit_layer] = tokenizer.decode(knowledge_neurons[early_exit_layer][0])
-        # hidden_info[early_exit_layer] = tokenizer.decode(torch.tensor(hidden_values[early_exit_layer]).to("cuda"))
+    for layer_index in range(len(model.model.layers)):
+        hidden_embed[layer_index] = tokenizer.decode(hidden_states[layer_index][0])
     answer = tokenizer.decode(outputs[0]).replace('<pad> ', '')
     answer = answer.replace('</s>', '')
     
@@ -34,10 +71,6 @@ def _detect_neurons(
     lines = [line.strip() for line in lines]
     lines = random.sample(lines, corpus_sample_size)
 
-    candidate_premature_layers = []
-    for i in range(32):
-        candidate_premature_layers.append(i)
-
     activate_keys_set_fwd_up = []
     activate_keys_set_fwd_down = []
     activate_keys_set_q = []
@@ -52,7 +85,6 @@ def _detect_neurons(
                 model,
                 tokenizer,
                 prompt,
-                candidate_premature_layers,
             )
             activate_keys_set_fwd_up.append(activate_keys_fwd_up)
             activate_keys_set_fwd_down.append(activate_keys_fwd_down)
