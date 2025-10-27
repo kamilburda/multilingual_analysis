@@ -1,11 +1,14 @@
 import collections
 import logging
+import math
 import os
 import random
 
 import click
 import torch
+from torch import nn
 from tqdm import tqdm
+import transformers.models
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 
@@ -24,16 +27,112 @@ def Prompting(model, tokenizer, prompt):
 
 
     def mlp_hook(module, args, output):
-        hidden_state = args[0]
+        hidden_states = args[0]
 
         return (
             output, 
-            torch.sum(torch.abs(module.up_proj(hidden_state)), dim=1).squeeze().tolist(),
-            torch.sum(torch.abs(module.up_proj(hidden_state)), dim=1).squeeze().tolist(),
+            torch.sum(torch.abs(module.up_proj(hidden_states)), dim=1).squeeze().tolist(),
+            torch.sum(torch.abs(module.up_proj(hidden_states)), dim=1).squeeze().tolist(),
         )
 
 
-    def store_activated_neurons_hook(module, _args, output):
+    # Most of the code is copied from transformers.models.mistral.modeling_mistral.MistralAttention.forward()
+    def self_attn_hook(module, _args, kwargs, output):
+        hidden_states = kwargs["hidden_states"]
+        attention_mask = kwargs.get("attention_mask")
+        
+        orig_attn_output, orig_attn_weights, orig_past_key_value = output
+
+        bsz, q_len, _ = hidden_states.size()
+
+        query_states = module.q_proj(hidden_states)
+        query_states = query_states.view(bsz, q_len, module.num_heads, module.head_dim).transpose(1, 2)
+
+        if orig_past_key_value is not None:
+            key_states = orig_past_key_value.key_cache[module.layer_idx]
+            value_states = orig_past_key_value.value_cache[module.layer_idx]
+
+            value_states_from_hidden_states = module.v_proj(hidden_states)
+            value_states_from_hidden_states = value_states_from_hidden_states.view(
+                bsz, q_len, module.num_key_value_heads, module.head_dim).transpose(1, 2)
+
+            cos, sin = module.rotary_emb(value_states_from_hidden_states, kwargs.get("position_ids"))
+            query_states, _ = _apply_rotary_pos_emb(query_states, None, cos, sin)
+        else:
+            # There is no cache to update when the original `past_key_value` argument
+            # was omitted from `forward()` (i.e. was None).
+            key_states = module.k_proj(hidden_states)
+            value_states = module.v_proj(hidden_states)
+
+            key_states = key_states.view(bsz, q_len, module.num_key_value_heads, module.head_dim).transpose(1, 2)
+            value_states = value_states.view(bsz, q_len, module.num_key_value_heads, module.head_dim).transpose(1, 2)
+
+            cos, sin = module.rotary_emb(value_states, kwargs.get("position_ids"))
+            query_states, key_states = _apply_rotary_pos_emb(query_states, key_states, cos, sin)
+
+        key_states = _repeat_kv(key_states, module.num_key_value_groups)
+        value_states = _repeat_kv(value_states, module.num_key_value_groups)
+
+        if hasattr(module, "scaling"):
+            scaling = module.scaling
+        else:
+            scaling = 1 / math.sqrt(module.head_dim)
+
+        attn_weights = torch.matmul(query_states, key_states.transpose(2, 3)) * scaling
+        attn_weights_temp = torch.matmul(query_states.transpose(2, 3).unsqueeze(-1), key_states.transpose(2, 3).unsqueeze(-1).transpose(-2, -1))
+
+        if getattr(module.config, "attn_logit_softcapping", None) is not None:
+            attn_weights = attn_weights / module.config.attn_logit_softcapping
+            attn_weights = torch.tanh(attn_weights)
+            attn_weights = attn_weights * module.config.attn_logit_softcapping
+
+        if attention_mask is not None:  # no matter the length, we just slice it
+            causal_mask = attention_mask[:, :, :, : key_states.shape[-2]]
+            attn_weights = attn_weights + causal_mask
+
+            attn_weights_temp = attn_weights_temp + attention_mask.unsqueeze(2)
+
+        attn_weights_temp = attn_weights.unsqueeze(2).expand(-1, -1, query_states.size()[-1], -1, -1) - attn_weights_temp
+        attn_weights_temp = nn.functional.softmax(attn_weights_temp, dim=-1, dtype=torch.float32).to(query_states.dtype)
+
+        # upcast attention to fp32
+        attn_weights = nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32).to(query_states.dtype)
+        attn_weights = nn.functional.dropout(attn_weights, p=module.attention_dropout, training=module.training)
+        attn_output = torch.matmul(attn_weights, value_states)
+
+        if attn_output.size() != (bsz, module.num_heads, q_len, module.head_dim):
+            raise ValueError(
+                f"`attn_output` should be of size {(bsz, module.num_heads, q_len, module.head_dim)}, but is"
+                f" {attn_output.size()}"
+            )
+
+        attn_weights_temp = attn_weights_temp - attn_weights.unsqueeze(2).expand(-1, -1, query_states.size()[-1], -1, -1)
+        attn_weights_temp = attn_weights_temp ** 2
+        attn_weights_temp = attn_weights_temp.sum(dim=(-2, -1)).view(-1)
+
+        attn_weights = None
+
+        attn_output = attn_output.transpose(1, 2).contiguous()
+        attn_output_temp = attn_output.reshape(bsz, q_len, module.hidden_size)\
+
+        if module.config.model_type == "llama":
+            attn_output = attn_output.reshape(bsz, q_len, module.hidden_size)
+        else:
+            attn_output = attn_output.view(bsz, q_len, -1)
+
+        attn_output_o = attn_output
+
+        attn_output = module.o_proj(attn_output)
+
+        query_score = attn_weights_temp.squeeze().tolist()
+        key_score = attn_weights_temp.squeeze().tolist()
+        attn_output_temp_score = torch.sum(torch.abs(attn_output_temp), dim=1).squeeze().tolist()
+        o_score = torch.sum(torch.abs(attn_output_o), dim=1).squeeze().tolist()
+
+        return orig_attn_output, orig_attn_weights, orig_past_key_value, query_score, key_score, attn_output_temp_score, o_score
+
+
+    def store_activated_neurons_hook(_module, _args, output):
         nonlocal hidden_states_as_lists, logits_dict, activate_keys_fwd_up, activate_keys_fwd_down, activate_keys_q, activate_keys_k, activate_keys_v, activate_keys_o, layer_keys
 
         logits_dict, outputs, activate_keys_fwd_up, activate_keys_fwd_down, activate_keys_q, activate_keys_k, activate_keys_v, activate_keys_o, layer_keys = output
@@ -49,6 +148,10 @@ def Prompting(model, tokenizer, prompt):
     for layer in model.model.layers:
         mlp_handles.append(layer.mlp.register_forward_hook(mlp_hook))
 
+    self_attn_handles = []
+    for layer in model.model.layers:
+        self_attn_handles.append(layer.self_attn.register_forward_hook(self_attn_hook, with_kwargs=True))
+
     store_activated_neurons_handle = model.register_forward_hook(store_activated_neurons_hook)
     try:
         outputs = model.generate(
@@ -59,6 +162,8 @@ def Prompting(model, tokenizer, prompt):
         )
     finally:
         for handle in mlp_handles:
+            handle.remove()
+        for handle in self_attn_handles:
             handle.remove()
         store_activated_neurons_handle.remove()
 
@@ -192,6 +297,65 @@ def _detect_neurons(
         file.write(str(common_elements_dict_q) + '\n')
         file.write(str(common_elements_dict_k) + '\n')
         file.write(str(common_elements_dict_v) + '\n')
+
+
+# Copied from transformers.models.llama.modeling_llama.apply_rotary_pos_emb
+# and modified to allow ignoring processing q or k
+def _apply_rotary_pos_emb(q, k, cos, sin, position_ids=None, unsqueeze_dim=1):
+    """Applies Rotary Position Embedding to the query and key tensors.
+
+    Args:
+        q (`torch.Tensor` or `None`): The query tensor, or `None` if processing this tensor is not needed.
+        k (`torch.Tensor` or `None`): The key tensor, or `None` if processing this tensor is not needed.
+        cos (`torch.Tensor`): The cosine part of the rotary embedding.
+        sin (`torch.Tensor`): The sine part of the rotary embedding.
+        position_ids (`torch.Tensor`, *optional*):
+            Deprecated and unused.
+        unsqueeze_dim (`int`, *optional*, defaults to 1):
+            The 'unsqueeze_dim' argument specifies the dimension along which to unsqueeze cos[position_ids] and
+            sin[position_ids] so that they can be properly broadcasted to the dimensions of q and k. For example, note
+            that cos[position_ids] and sin[position_ids] have the shape [batch_size, seq_len, head_dim]. Then, if q and
+            k have the shape [batch_size, heads, seq_len, head_dim], then setting unsqueeze_dim=1 makes
+            cos[position_ids] and sin[position_ids] broadcastable to the shapes of q and k. Similarly, if q and k have
+            the shape [batch_size, seq_len, heads, head_dim], then set unsqueeze_dim=2.
+    Returns:
+        `tuple(torch.Tensor)` comprising of the query and key tensors rotated using the Rotary Position Embedding.
+    """
+    cos = cos.unsqueeze(unsqueeze_dim)
+    sin = sin.unsqueeze(unsqueeze_dim)
+
+    if q is not None:
+        q_embed = (q * cos) + (_rotate_half(q) * sin)
+    else:
+        q_embed = None
+    
+    if k is not None:
+        k_embed = (k * cos) + (_rotate_half(k) * sin)
+    else:
+        k_embed = None
+
+    return q_embed, k_embed
+
+
+# Copied from transformers.models.llama.modeling_llama.rotate_half
+def _rotate_half(x):
+    """Rotates half the hidden dims of the input."""
+    x1 = x[..., : x.shape[-1] // 2]
+    x2 = x[..., x.shape[-1] // 2 :]
+    return torch.cat((-x2, x1), dim=-1)
+
+
+# Copied from transformers.models.llama.modeling_llama.repeat_kv
+def _repeat_kv(hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor:
+    """
+    This is the equivalent of torch.repeat_interleave(x, dim=1, repeats=n_rep). The hidden states go from (batch,
+    num_key_value_heads, seqlen, head_dim) to (batch, num_attention_heads, seqlen, head_dim)
+    """
+    batch, num_key_value_heads, slen, head_dim = hidden_states.shape
+    if n_rep == 1:
+        return hidden_states
+    hidden_states = hidden_states[:, :, None, :, :].expand(batch, num_key_value_heads, n_rep, slen, head_dim)
+    return hidden_states.reshape(batch, num_key_value_heads * n_rep, slen, head_dim)
 
 
 @click.command()

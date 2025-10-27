@@ -239,15 +239,10 @@ class MistralAttention(nn.Module):
         value_states = repeat_kv(value_states, self.num_key_value_groups)
 
         attn_weights = torch.matmul(query_states, key_states.transpose(2, 3)) / math.sqrt(self.head_dim)
-        attn_weights_temp = torch.matmul(query_states.transpose(2, 3).unsqueeze(-1), key_states.transpose(2, 3).unsqueeze(-1).transpose(-2, -1))
 
         if attention_mask is not None:  # no matter the length, we just slice it
             causal_mask = attention_mask[:, :, :, : key_states.shape[-2]]
             attn_weights = attn_weights + causal_mask
-            attn_weights_temp = attn_weights_temp + attention_mask.unsqueeze(2)
-
-        attn_weights_temp = attn_weights.unsqueeze(2).expand(-1, -1, query_states.size()[-1], -1, -1) - attn_weights_temp
-        attn_weights_temp = nn.functional.softmax(attn_weights_temp, dim=-1, dtype=torch.float32).to(query_states.dtype)
 
         # upcast attention to fp32
         attn_weights = nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32).to(query_states.dtype)
@@ -260,28 +255,15 @@ class MistralAttention(nn.Module):
                 f" {attn_output.size()}"
             )
 
-        attn_weights_temp = attn_weights_temp - attn_weights.unsqueeze(2).expand(-1, -1, query_states.size()[-1], -1, -1)
-        attn_weights_temp = attn_weights_temp ** 2
-        attn_weights_temp = attn_weights_temp.sum(dim=(-2, -1)).view(-1)
-
         attn_output = attn_output.transpose(1, 2).contiguous()
 
         attn_output = attn_output.view(bsz, q_len, -1)
-        attn_output_temp = attn_output.reshape(bsz, q_len, 4096)
-
-        attn_output_o = attn_output
-
         attn_output = self.o_proj(attn_output)
 
         if not output_attentions:
             attn_weights = None
 
-        query_score = attn_weights_temp.squeeze().tolist()
-        key_score = attn_weights_temp.squeeze().tolist()
-        attn_output_temp_score = torch.sum(torch.abs(attn_output_temp), dim=1).squeeze().tolist()
-        o_score = torch.sum(torch.abs(attn_output_o), dim=1).squeeze().tolist()
-
-        return attn_output, attn_weights, past_key_value, query_score, key_score, attn_output_temp_score, o_score
+        return attn_output, attn_weights, past_key_value
 
 
 class MistralFlashAttention2(MistralAttention):
