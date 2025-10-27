@@ -47,7 +47,6 @@ from ...utils import (
 )
 from .configuration_mistral import MistralConfig
 import numpy as np
-import pdb
 
 if is_flash_attn_2_available():
     from ...modeling_flash_attention_utils import _flash_attention_forward
@@ -154,8 +153,7 @@ class MistralMLP(nn.Module):
         self.act_fn = ACT2FN[config.hidden_act]
 
     def forward(self, hidden_state):
-        real_output = self.down_proj(self.act_fn(self.gate_proj(hidden_state)) * self.up_proj(hidden_state))
-        return real_output, torch.sum(torch.abs(self.up_proj(hidden_state)), dim=1).squeeze().tolist(), torch.sum(torch.abs(self.up_proj(hidden_state)), dim=1).squeeze().tolist()
+        return self.down_proj(self.act_fn(self.gate_proj(hidden_state)) * self.up_proj(hidden_state))
 
 
 # Copied from transformers.models.llama.modeling_llama.repeat_kv
@@ -1088,8 +1086,6 @@ class MistralForCausalLM(MistralPreTrainedModel):
 
         combined_data = {key: summed_data_fwd[key]*3 + summed_data_q[key]*2 + summed_data_v[key]*2 for key in summed_data_fwd}
 
-        # pdb.set_trace()
-        
         logits_dict = {}
         activate_keys_fwd_up = {}
         activate_keys_fwd_down = {}
@@ -1103,7 +1099,6 @@ class MistralForCausalLM(MistralPreTrainedModel):
             top_number_attn = 1000
             top_number_ffn = 2000
             top_number_layer = 24
-            # pdb.set_trace()
             # top_indices = operator.itemgetter(*(np.argsort(hidden_scores_fwd_up[early_exit_layer])[-top_number:][::-1]).tolist())(hidden_scores_fwd_up[early_exit_layer])
             top_indices = np.argsort(hidden_scores_fwd_up[layer_index])[-top_number_ffn:][::-1]
             activate_keys_fwd_up[layer_index] = top_indices

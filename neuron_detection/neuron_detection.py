@@ -23,7 +23,17 @@ def Prompting(model, tokenizer, prompt):
     layer_keys = None
 
 
-    def store_activated_neurons_hook(model_, input_, output):
+    def mlp_hook(model_, _args, output):
+        hidden_state = _args[0]
+
+        return (
+            output, 
+            torch.sum(torch.abs(model_.up_proj(hidden_state)), dim=1).squeeze().tolist(),
+            torch.sum(torch.abs(model_.up_proj(hidden_state)), dim=1).squeeze().tolist(),
+        )
+
+
+    def store_activated_neurons_hook(model_, _args, output):
         nonlocal hidden_states_as_lists, logits_dict, activate_keys_fwd_up, activate_keys_fwd_down, activate_keys_q, activate_keys_k, activate_keys_v, activate_keys_o, layer_keys
 
         logits_dict, outputs, activate_keys_fwd_up, activate_keys_fwd_down, activate_keys_q, activate_keys_k, activate_keys_v, activate_keys_o, layer_keys = output
@@ -35,6 +45,10 @@ def Prompting(model, tokenizer, prompt):
         return outputs
 
 
+    mlp_handles = []
+    for layer in model.model.layers:
+        mlp_handles.append(layer.mlp.register_forward_hook(mlp_hook))
+
     store_activated_neurons_handle = model.register_forward_hook(store_activated_neurons_hook)
     try:
         outputs = model.generate(
@@ -44,6 +58,8 @@ def Prompting(model, tokenizer, prompt):
             output_hidden_states=True,
         )
     finally:
+        for handle in mlp_handles:
+            handle.remove()
         store_activated_neurons_handle.remove()
 
     hidden_states = {}
