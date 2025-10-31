@@ -5,153 +5,200 @@ import os
 import random
 
 import click
+import numpy as np
 import torch
 from torch import nn
 from tqdm import tqdm
-import transformers.models
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 
-def Prompting(model, tokenizer, prompt):
+def Prompting(
+        model,
+        tokenizer,
+        prompt,
+        top_number_attn: int = 1000,
+        top_number_ffn: int = 2000,
+        top_number_layer: int = 24,
+):
     inputs = tokenizer(prompt, return_tensors="pt").to("cuda")
 
     hidden_states_as_lists = collections.defaultdict(list)
-    logits_dict = None
-    activate_keys_fwd_up = None
-    activate_keys_fwd_down = None
-    activate_keys_q = None
-    activate_keys_k = None
-    activate_keys_v = None
-    activate_keys_o = None
-    layer_keys = None
+    logits_dict = {}
+    activate_keys_fwd_up = {}
+    activate_keys_fwd_down = {}
+    activate_keys_q = {}
+    activate_keys_k = {}
+    activate_keys_v = {}
+    activate_keys_o = {}
+    layer_keys = {}
+
+    hidden_scores_fwd_up = {}
+    hidden_scores_fwd_down = {}
+    hidden_scores_q = {}
+    hidden_scores_k = {}
+    hidden_scores_v = {}
+    hidden_scores_o = {}
 
 
-    def mlp_hook(module, args, output):
-        hidden_states = args[0]
+    def mlp_hook_with_layer_idx(layer_idx):
 
-        return (
-            output, 
-            torch.sum(torch.abs(module.up_proj(hidden_states)), dim=1).squeeze().tolist(),
-            torch.sum(torch.abs(module.up_proj(hidden_states)), dim=1).squeeze().tolist(),
-        )
+        def mlp_hook(module, args, _output):
+            hidden_states = args[0]
 
-
-    # Most of the code is copied from transformers.models.mistral.modeling_mistral.MistralAttention.forward()
-    def self_attn_hook(module, _args, kwargs, output):
-        hidden_states = kwargs["hidden_states"]
-        attention_mask = kwargs.get("attention_mask")
+            hidden_scores_fwd_up[layer_idx] = torch.sum(torch.abs(module.up_proj(hidden_states)), dim=1).squeeze().tolist()
+            hidden_scores_fwd_down[layer_idx] = torch.sum(torch.abs(module.up_proj(hidden_states)), dim=1).squeeze().tolist()
         
-        orig_attn_output, orig_attn_weights, orig_past_key_value = output
-
-        bsz, q_len, _ = hidden_states.size()
-
-        query_states = module.q_proj(hidden_states)
-        query_states = query_states.view(bsz, q_len, module.num_heads, module.head_dim).transpose(1, 2)
-
-        if orig_past_key_value is not None:
-            key_states = orig_past_key_value.key_cache[module.layer_idx]
-            value_states = orig_past_key_value.value_cache[module.layer_idx]
-
-            value_states_from_hidden_states = module.v_proj(hidden_states)
-            value_states_from_hidden_states = value_states_from_hidden_states.view(
-                bsz, q_len, module.num_key_value_heads, module.head_dim).transpose(1, 2)
-
-            cos, sin = module.rotary_emb(value_states_from_hidden_states, kwargs.get("position_ids"))
-            query_states, _ = _apply_rotary_pos_emb(query_states, None, cos, sin)
-        else:
-            # There is no cache to update when the original `past_key_value` argument
-            # was omitted from `forward()` (i.e. was None).
-            key_states = module.k_proj(hidden_states)
-            value_states = module.v_proj(hidden_states)
-
-            key_states = key_states.view(bsz, q_len, module.num_key_value_heads, module.head_dim).transpose(1, 2)
-            value_states = value_states.view(bsz, q_len, module.num_key_value_heads, module.head_dim).transpose(1, 2)
-
-            cos, sin = module.rotary_emb(value_states, kwargs.get("position_ids"))
-            query_states, key_states = _apply_rotary_pos_emb(query_states, key_states, cos, sin)
-
-        key_states = _repeat_kv(key_states, module.num_key_value_groups)
-        value_states = _repeat_kv(value_states, module.num_key_value_groups)
-
-        if hasattr(module, "scaling"):
-            scaling = module.scaling
-        else:
-            scaling = 1 / math.sqrt(module.head_dim)
-
-        attn_weights = torch.matmul(query_states, key_states.transpose(2, 3)) * scaling
-        attn_weights_temp = torch.matmul(query_states.transpose(2, 3).unsqueeze(-1), key_states.transpose(2, 3).unsqueeze(-1).transpose(-2, -1))
-
-        if getattr(module.config, "attn_logit_softcapping", None) is not None:
-            attn_weights = attn_weights / module.config.attn_logit_softcapping
-            attn_weights = torch.tanh(attn_weights)
-            attn_weights = attn_weights * module.config.attn_logit_softcapping
-
-        if attention_mask is not None:  # no matter the length, we just slice it
-            causal_mask = attention_mask[:, :, :, : key_states.shape[-2]]
-            attn_weights = attn_weights + causal_mask
-
-            attn_weights_temp = attn_weights_temp + attention_mask.unsqueeze(2)
-
-        attn_weights_temp = attn_weights.unsqueeze(2).expand(-1, -1, query_states.size()[-1], -1, -1) - attn_weights_temp
-        attn_weights_temp = nn.functional.softmax(attn_weights_temp, dim=-1, dtype=torch.float32).to(query_states.dtype)
-
-        # upcast attention to fp32
-        attn_weights = nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32).to(query_states.dtype)
-        attn_weights = nn.functional.dropout(attn_weights, p=module.attention_dropout, training=module.training)
-        attn_output = torch.matmul(attn_weights, value_states)
-
-        if attn_output.size() != (bsz, module.num_heads, q_len, module.head_dim):
-            raise ValueError(
-                f"`attn_output` should be of size {(bsz, module.num_heads, q_len, module.head_dim)}, but is"
-                f" {attn_output.size()}"
-            )
-
-        attn_weights_temp = attn_weights_temp - attn_weights.unsqueeze(2).expand(-1, -1, query_states.size()[-1], -1, -1)
-        attn_weights_temp = attn_weights_temp ** 2
-        attn_weights_temp = attn_weights_temp.sum(dim=(-2, -1)).view(-1)
-
-        attn_weights = None
-
-        attn_output = attn_output.transpose(1, 2).contiguous()
-        attn_output_temp = attn_output.reshape(bsz, q_len, module.hidden_size)\
-
-        if module.config.model_type == "llama":
-            attn_output = attn_output.reshape(bsz, q_len, module.hidden_size)
-        else:
-            attn_output = attn_output.view(bsz, q_len, -1)
-
-        attn_output_o = attn_output
-
-        attn_output = module.o_proj(attn_output)
-
-        query_score = attn_weights_temp.squeeze().tolist()
-        key_score = attn_weights_temp.squeeze().tolist()
-        attn_output_temp_score = torch.sum(torch.abs(attn_output_temp), dim=1).squeeze().tolist()
-        o_score = torch.sum(torch.abs(attn_output_o), dim=1).squeeze().tolist()
-
-        return orig_attn_output, orig_attn_weights, orig_past_key_value, query_score, key_score, attn_output_temp_score, o_score
+        return mlp_hook
 
 
-    def store_activated_neurons_hook(_module, _args, output):
+    # While `*Attention` classes have a `layer_idx` attribute, we pass the layer index
+    # explicitly in case some `*Attention` classes do not have this attribute.
+    def self_attn_hook_with_layer_idx(layer_idx):
+
+        # Most of the code is copied from transformers.models.mistral.modeling_mistral.MistralAttention.forward()
+        def self_attn_hook(module, _args, kwargs, output):
+            hidden_states = kwargs["hidden_states"]
+            attention_mask = kwargs.get("attention_mask")
+            
+            orig_attn_output, orig_attn_weights, orig_past_key_value = output
+
+            bsz, q_len, _ = hidden_states.size()
+
+            query_states = module.q_proj(hidden_states)
+            query_states = query_states.view(bsz, q_len, module.num_heads, module.head_dim).transpose(1, 2)
+
+            if orig_past_key_value is not None:
+                key_states = orig_past_key_value.key_cache[layer_idx]
+                value_states = orig_past_key_value.value_cache[layer_idx]
+
+                value_states_from_hidden_states = module.v_proj(hidden_states)
+                value_states_from_hidden_states = value_states_from_hidden_states.view(
+                    bsz, q_len, module.num_key_value_heads, module.head_dim).transpose(1, 2)
+
+                cos, sin = module.rotary_emb(value_states_from_hidden_states, kwargs.get("position_ids"))
+                query_states, _ = _apply_rotary_pos_emb(query_states, None, cos, sin)
+            else:
+                # There is no cache to update when the original `past_key_value` argument
+                # was omitted from `forward()` (i.e. was None).
+                key_states = module.k_proj(hidden_states)
+                value_states = module.v_proj(hidden_states)
+
+                key_states = key_states.view(bsz, q_len, module.num_key_value_heads, module.head_dim).transpose(1, 2)
+                value_states = value_states.view(bsz, q_len, module.num_key_value_heads, module.head_dim).transpose(1, 2)
+
+                cos, sin = module.rotary_emb(value_states, kwargs.get("position_ids"))
+                query_states, key_states = _apply_rotary_pos_emb(query_states, key_states, cos, sin)
+
+            key_states = _repeat_kv(key_states, module.num_key_value_groups)
+            value_states = _repeat_kv(value_states, module.num_key_value_groups)
+
+            if hasattr(module, "scaling"):
+                scaling = module.scaling
+            else:
+                scaling = 1 / math.sqrt(module.head_dim)
+
+            attn_weights = torch.matmul(query_states, key_states.transpose(2, 3)) * scaling
+            attn_weights_temp = torch.matmul(query_states.transpose(2, 3).unsqueeze(-1), key_states.transpose(2, 3).unsqueeze(-1).transpose(-2, -1))
+
+            if getattr(module.config, "attn_logit_softcapping", None) is not None:
+                attn_weights = attn_weights / module.config.attn_logit_softcapping
+                attn_weights = torch.tanh(attn_weights)
+                attn_weights = attn_weights * module.config.attn_logit_softcapping
+
+            if attention_mask is not None:  # no matter the length, we just slice it
+                causal_mask = attention_mask[:, :, :, : key_states.shape[-2]]
+                attn_weights = attn_weights + causal_mask
+
+                attn_weights_temp = attn_weights_temp + attention_mask.unsqueeze(2)
+
+            attn_weights_temp = attn_weights.unsqueeze(2).expand(-1, -1, query_states.size()[-1], -1, -1) - attn_weights_temp
+            attn_weights_temp = nn.functional.softmax(attn_weights_temp, dim=-1, dtype=torch.float32).to(query_states.dtype)
+
+            # upcast attention to fp32
+            attn_weights = nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32).to(query_states.dtype)
+            attn_weights = nn.functional.dropout(attn_weights, p=module.attention_dropout, training=module.training)
+            attn_output = torch.matmul(attn_weights, value_states)
+
+            if attn_output.size() != (bsz, module.num_heads, q_len, module.head_dim):
+                raise ValueError(
+                    f"`attn_output` should be of size {(bsz, module.num_heads, q_len, module.head_dim)}, but is"
+                    f" {attn_output.size()}"
+                )
+
+            attn_weights_temp = attn_weights_temp - attn_weights.unsqueeze(2).expand(-1, -1, query_states.size()[-1], -1, -1)
+            attn_weights_temp = attn_weights_temp ** 2
+            attn_weights_temp = attn_weights_temp.sum(dim=(-2, -1)).view(-1)
+
+            attn_weights = None
+
+            attn_output = attn_output.transpose(1, 2).contiguous()
+            attn_output_temp = attn_output.reshape(bsz, q_len, module.hidden_size)\
+
+            if module.config.model_type == "llama":
+                attn_output = attn_output.reshape(bsz, q_len, module.hidden_size)
+            else:
+                attn_output = attn_output.view(bsz, q_len, -1)
+
+            attn_output_o = attn_output
+
+            attn_output = module.o_proj(attn_output)
+
+            hidden_scores_q[layer_idx] = attn_weights_temp.squeeze().tolist()
+            hidden_scores_k[layer_idx] = attn_weights_temp.squeeze().tolist()
+            hidden_scores_v[layer_idx] = torch.sum(torch.abs(attn_output_temp), dim=1).squeeze().tolist()
+            hidden_scores_o[layer_idx] = torch.sum(torch.abs(attn_output_o), dim=1).squeeze().tolist()
+
+            return orig_attn_output, orig_attn_weights, orig_past_key_value
+
+        return self_attn_hook
+
+
+    def store_activated_neurons_hook(module, _args, output):
         nonlocal hidden_states_as_lists, logits_dict, activate_keys_fwd_up, activate_keys_fwd_down, activate_keys_q, activate_keys_k, activate_keys_v, activate_keys_o, layer_keys
 
-        logits_dict, outputs, activate_keys_fwd_up, activate_keys_fwd_down, activate_keys_q, activate_keys_k, activate_keys_v, activate_keys_o, layer_keys = output
+        summed_data_fwd = {key: sum(value) for key, value in hidden_scores_fwd_up.items()}
+        summed_data_q = {key: sum(value) for key, value in hidden_scores_q.items()}
+        summed_data_v = {key: sum(value) for key, value in hidden_scores_v.items()}
+
+        combined_data = {key: summed_data_fwd[key] * 3 + summed_data_q[key] * 2 + summed_data_v[key] * 2 for key in summed_data_fwd}
+
+        for layer_index in range(len(module.model.layers)):
+            logits_dict[layer_index] = module.lm_head(output.hidden_states[layer_index]).float()
+            top_indices = np.argsort(hidden_scores_fwd_up[layer_index])[-top_number_ffn:][::-1]
+            activate_keys_fwd_up[layer_index] = top_indices
+            top_indices = np.argsort(hidden_scores_fwd_down[layer_index])[-top_number_ffn:][::-1]
+            activate_keys_fwd_down[layer_index] = top_indices
+            top_indices = np.argsort(hidden_scores_q[layer_index])[-top_number_attn:][::-1]
+            activate_keys_q[layer_index] = top_indices
+            top_indices = np.argsort(hidden_scores_k[layer_index])[-top_number_attn:][::-1]
+            activate_keys_k[layer_index] = top_indices
+            top_indices = np.argsort(hidden_scores_v[layer_index])[-top_number_attn:][::-1]
+            activate_keys_v[layer_index] = top_indices
+            top_indices = np.argsort(hidden_scores_o[layer_index])[-top_number_attn:][::-1]
+            activate_keys_o[layer_index] = top_indices
+            sorted_items = sorted(combined_data.items(), key=lambda item: item[1])
+            layer_keys = [item[0] for item in sorted_items[-top_number_layer:]]
 
         # TODO: This may not yield the same results as embedding this code inside `model._sample()` in case of multiple GPUs.
         for layer_index, logit in logits_dict.items():
             hidden_states_as_lists[layer_index].append(torch.argmax(logit, dim=-1))
-        
-        return outputs
 
 
     mlp_handles = []
-    for layer in model.model.layers:
-        mlp_handles.append(layer.mlp.register_forward_hook(mlp_hook))
-
+    for index, layer in enumerate(model.model.layers):
+        mlp_handles.append(
+            layer.mlp.register_forward_hook(
+                mlp_hook_with_layer_idx(layer_idx=index),
+            )
+        )
     self_attn_handles = []
-    for layer in model.model.layers:
-        self_attn_handles.append(layer.self_attn.register_forward_hook(self_attn_hook, with_kwargs=True))
-
+    for index, layer in enumerate(model.model.layers):
+        self_attn_handles.append(
+            layer.self_attn.register_forward_hook(
+                self_attn_hook_with_layer_idx(layer_idx=index),
+                with_kwargs=True,
+            )
+        )
     store_activated_neurons_handle = model.register_forward_hook(store_activated_neurons_hook)
     try:
         outputs = model.generate(
@@ -397,7 +444,11 @@ def main(
         random.seed(random_seed)
 
     tokenizer = AutoTokenizer.from_pretrained(model_name)
-    model = AutoModelForCausalLM.from_pretrained(model_name, device_map="auto")
+    model = AutoModelForCausalLM.from_pretrained(
+        model_name,
+        device_map="auto",
+        attn_implementation="eager",
+    )
 
     # Force greedy search
     model.generation_config.do_sample = False

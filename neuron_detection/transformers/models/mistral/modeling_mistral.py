@@ -46,7 +46,7 @@ from ...utils import (
     replace_return_docstrings,
 )
 from .configuration_mistral import MistralConfig
-import numpy as np
+
 
 if is_flash_attn_2_available():
     from ...modeling_flash_attention_utils import _flash_attention_forward
@@ -494,7 +494,7 @@ class MistralSdpaAttention(MistralAttention):
 MISTRAL_ATTENTION_CLASSES = {
     "eager": MistralAttention,
     "flash_attention_2": MistralFlashAttention2,
-    "sdpa": MistralAttention,
+    "sdpa": MistralSdpaAttention,
 }
 
 
@@ -546,7 +546,7 @@ class MistralDecoderLayer(nn.Module):
         hidden_states = self.input_layernorm(hidden_states)
 
         # Self Attention
-        hidden_states, self_attn_weights, present_key_value, hidden_score_q, hidden_score_k, hidden_score_v, hidden_score_o  = self.self_attn(
+        hidden_states, self_attn_weights, present_key_value = self.self_attn(
             hidden_states=hidden_states,
             attention_mask=attention_mask,
             position_ids=position_ids,
@@ -561,7 +561,7 @@ class MistralDecoderLayer(nn.Module):
         # Fully Connected
         residual = hidden_states
         hidden_states = self.post_attention_layernorm(hidden_states)
-        hidden_states, hidden_score_fwd_up, hidden_score_fwd_down = self.mlp(hidden_states)
+        hidden_states = self.mlp(hidden_states)
         hidden_states = residual + hidden_states
 
         outputs = (hidden_states,)
@@ -572,7 +572,7 @@ class MistralDecoderLayer(nn.Module):
         if use_cache:
             outputs += (present_key_value,)
 
-        return outputs, hidden_score_fwd_up, hidden_score_fwd_down, hidden_score_q, hidden_score_k, hidden_score_v, hidden_score_o
+        return outputs
 
 
 MISTRAL_START_DOCSTRING = r"""
@@ -789,15 +789,7 @@ class MistralModel(MistralPreTrainedModel):
         all_self_attns = () if output_attentions else None
         next_decoder_cache = None
 
-        hidden_scores_fwd_up = {}
-        hidden_scores_fwd_down = {}
-        hidden_scores_q = {}
-        hidden_scores_k = {}
-        hidden_scores_v = {}
-        hidden_scores_o = {}
-
-
-        for idx, decoder_layer in enumerate(self.layers):
+        for decoder_layer in self.layers:
             if output_hidden_states:
                 all_hidden_states += (hidden_states,)
 
@@ -813,7 +805,7 @@ class MistralModel(MistralPreTrainedModel):
                     cache_position,
                 )
             else:
-                layer_outputs, hidden_score_fwd_up, hidden_score_fwd_down, hidden_score_q, hidden_score_k, hidden_score_v, hidden_score_o = decoder_layer(
+                layer_outputs = decoder_layer(
                     hidden_states,
                     attention_mask=causal_mask,
                     position_ids=position_ids,
@@ -822,13 +814,6 @@ class MistralModel(MistralPreTrainedModel):
                     use_cache=use_cache,
                     cache_position=cache_position,
                 )
-
-            hidden_scores_fwd_up[idx] = hidden_score_fwd_up
-            hidden_scores_fwd_down[idx] = hidden_score_fwd_down
-            hidden_scores_q[idx] = hidden_score_q
-            hidden_scores_k[idx] = hidden_score_k
-            hidden_scores_v[idx] = hidden_score_v
-            hidden_scores_o[idx] = hidden_score_o
 
             hidden_states = layer_outputs[0]
 
@@ -855,7 +840,7 @@ class MistralModel(MistralPreTrainedModel):
             past_key_values=next_cache,
             hidden_states=all_hidden_states,
             attentions=all_self_attns,
-        ), hidden_scores_fwd_up, hidden_scores_fwd_down, hidden_scores_q, hidden_scores_k, hidden_scores_v, hidden_scores_o
+        )
 
     def _update_causal_mask(
         self,
@@ -1045,7 +1030,7 @@ class MistralForCausalLM(MistralPreTrainedModel):
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
         # decoder outputs consists of (dec_features, layer_state, dec_hidden, dec_attn)
-        outputs, hidden_scores_fwd_up, hidden_scores_fwd_down, hidden_score_q, hidden_score_k, hidden_score_v, hidden_score_o = self.model(
+        outputs = self.model(
             input_ids=input_ids,
             attention_mask=attention_mask,
             position_ids=position_ids,
@@ -1061,45 +1046,6 @@ class MistralForCausalLM(MistralPreTrainedModel):
         hidden_states = outputs[0]
         logits = self.lm_head(hidden_states)
         logits = logits.float()
-
-        summed_data_fwd = {key: sum(value) for key, value in hidden_scores_fwd_up.items()}
-        summed_data_q = {key: sum(value) for key, value in hidden_score_q.items()}
-        summed_data_v = {key: sum(value) for key, value in hidden_score_v.items()}
-
-        combined_data = {key: summed_data_fwd[key]*3 + summed_data_q[key]*2 + summed_data_v[key]*2 for key in summed_data_fwd}
-
-        logits_dict = {}
-        activate_keys_fwd_up = {}
-        activate_keys_fwd_down = {}
-        activate_keys_q = {}
-        activate_keys_k = {}
-        activate_keys_v = {}
-        activate_keys_o = {}
-
-        for layer_index in range(len(self.model.layers)):
-            logits_dict[layer_index] = self.lm_head(outputs.hidden_states[layer_index]).float()
-            top_number_attn = 1000
-            top_number_ffn = 2000
-            top_number_layer = 24
-            # top_indices = operator.itemgetter(*(np.argsort(hidden_scores_fwd_up[early_exit_layer])[-top_number:][::-1]).tolist())(hidden_scores_fwd_up[early_exit_layer])
-            top_indices = np.argsort(hidden_scores_fwd_up[layer_index])[-top_number_ffn:][::-1]
-            activate_keys_fwd_up[layer_index] = top_indices
-            # top_indices = operator.itemgetter(*(np.argsort(hidden_scores_fwd_down[early_exit_layer])[-top_number:][::-1]).tolist())(hidden_scores_fwd_down[early_exit_layer])
-            top_indices = np.argsort(hidden_scores_fwd_down[layer_index])[-top_number_ffn:][::-1]
-            activate_keys_fwd_down[layer_index] = top_indices
-            # top_indices = operator.itemgetter(*(np.argsort(hidden_score_q[early_exit_layer])[-top_number:][::-1]).tolist())(hidden_score_q[early_exit_layer])
-            top_indices = np.argsort(hidden_score_q[layer_index])[-top_number_attn:][::-1]
-            activate_keys_q[layer_index] = top_indices
-            # top_indices = operator.itemgetter(*(np.argsort(hidden_score_k[early_exit_layer])[-top_number:][::-1]).tolist())(hidden_score_k[early_exit_layer])
-            top_indices = np.argsort(hidden_score_k[layer_index])[-top_number_attn:][::-1]
-            activate_keys_k[layer_index] = top_indices
-            # top_indices = operator.itemgetter(*(np.argsort(hidden_score_v[early_exit_layer])[-top_number:][::-1]).tolist())(hidden_score_v[early_exit_layer])
-            top_indices = np.argsort(hidden_score_v[layer_index])[-top_number_attn:][::-1]
-            activate_keys_v[layer_index] = top_indices
-            top_indices = np.argsort(hidden_score_o[layer_index])[-top_number_attn:][::-1]
-            activate_keys_o[layer_index] = top_indices
-            sorted_items = sorted(combined_data.items(), key=lambda item: item[1])
-            no_use_layer_index = [item[0] for item in sorted_items[-top_number_layer:]]
 
         loss = None
         if labels is not None:
@@ -1118,15 +1064,13 @@ class MistralForCausalLM(MistralPreTrainedModel):
             output = (logits,) + outputs[1:]
             return (loss,) + output if loss is not None else output
 
-        final_outputs = CausalLMOutputWithPast(
+        return CausalLMOutputWithPast(
             loss=loss,
             logits=logits,
             past_key_values=outputs.past_key_values,
             hidden_states=outputs.hidden_states,
             attentions=outputs.attentions,
         )
-
-        return logits_dict, final_outputs, activate_keys_fwd_up, activate_keys_fwd_down, activate_keys_q, activate_keys_k, activate_keys_v, activate_keys_o, no_use_layer_index
 
     def prepare_inputs_for_generation(
         self,
