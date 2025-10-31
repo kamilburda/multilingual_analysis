@@ -59,7 +59,7 @@ def Prompting(
         def self_attn_hook(module, _args, kwargs, output):
             hidden_states = kwargs["hidden_states"]
             attention_mask = kwargs.get("attention_mask")
-            
+
             orig_attn_output, orig_attn_weights, orig_past_key_value = output
 
             bsz, q_len, _ = hidden_states.size()
@@ -132,7 +132,7 @@ def Prompting(
             attn_weights = None
 
             attn_output = attn_output.transpose(1, 2).contiguous()
-            attn_output_temp = attn_output.reshape(bsz, q_len, module.hidden_size)\
+            attn_output_temp = attn_output.reshape(bsz, q_len, module.hidden_size)
 
             if module.config.model_type == "llama":
                 attn_output = attn_output.reshape(bsz, q_len, module.hidden_size)
