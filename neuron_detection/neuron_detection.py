@@ -19,6 +19,7 @@ def Prompting(
         top_number_attn: int = 1000,
         top_number_ffn: int = 2000,
         top_number_layer: int = 24,
+        suppress_attention_mask_creation: bool = True,
 ):
     inputs = tokenizer(prompt, return_tensors="pt").to("cuda")
 
@@ -38,6 +39,10 @@ def Prompting(
     hidden_scores_k = {}
     hidden_scores_v = {}
     hidden_scores_o = {}
+
+
+    def remove_attention_mask_pre_hook(_module, _args, kwargs):
+        kwargs["attention_mask"] = None
 
 
     def mlp_hook_with_layer_idx(layer_idx):
@@ -199,6 +204,22 @@ def Prompting(
                 with_kwargs=True,
             )
         )
+    remove_attention_mask_handles = []
+    if suppress_attention_mask_creation:
+        for index, layer in enumerate(model.model.layers):
+            remove_attention_mask_handles.append(
+                layer.register_forward_pre_hook(
+                    remove_attention_mask_pre_hook,
+                    with_kwargs=True,
+                )
+            )
+            remove_attention_mask_handles.append(
+                layer.self_attn.register_forward_pre_hook(
+                    remove_attention_mask_pre_hook,
+                    with_kwargs=True,
+                )
+            )
+        remove_attention_mask_handles.append(model.register_forward_pre_hook(remove_attention_mask_pre_hook, with_kwargs=True))
     store_activated_neurons_handle = model.register_forward_hook(store_activated_neurons_hook)
     try:
         outputs = model.generate(
@@ -211,6 +232,8 @@ def Prompting(
         for handle in mlp_handles:
             handle.remove()
         for handle in self_attn_handles:
+            handle.remove()
+        for handle in remove_attention_mask_handles:
             handle.remove()
         store_activated_neurons_handle.remove()
 
@@ -233,6 +256,7 @@ def _detect_neurons(
         tokenizer,
         language_corpus,
         corpus_sample_size,
+        suppress_attention_mask_creation,
 ):
     file_path = os.path.join("corpus_all", language_corpus + ".txt")
     with open(file_path, 'r') as file:
@@ -254,6 +278,7 @@ def _detect_neurons(
                 model,
                 tokenizer,
                 prompt,
+                suppress_attention_mask_creation=suppress_attention_mask_creation,
             )
             activate_keys_set_fwd_up.append(activate_keys_fwd_up)
             activate_keys_set_fwd_down.append(activate_keys_fwd_down)
@@ -432,12 +457,25 @@ def _repeat_kv(hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor:
         " If you do not wish to use a fixed random seed, use -1."
     ),
 )
+@click.option(
+    "--suppress-attention-mask/--no-suppress-attention-mask",
+    default=True,
+    help=(
+        "Suppresses/allows automatic creation of attention masks for consistency with the original repository."
+    ),
+)
 def main(
     language_corpora,
     corpus_sample_size,
     model_name,
     random_seed,
+    suppress_attention_mask,
 ):
+    """Detects language-specific neurons based on the method by Zhao et al.: https://arxiv.org/abs/2402.18815
+    
+    Original repository: https://github.com/DAMO-NLP-SG/multilingual_analysis
+    """
+
     logging.basicConfig(level=logging.INFO)
 
     if random_seed != -1:
@@ -455,7 +493,14 @@ def main(
     model.generation_config.num_beams = 1
 
     for language_corpus in language_corpora:
-        _detect_neurons(model_name, model, tokenizer, language_corpus, corpus_sample_size)    
+        _detect_neurons(
+            model_name,
+            model,
+            tokenizer,
+            language_corpus,
+            corpus_sample_size,
+            suppress_attention_mask,
+        )    
 
 
 if __name__ == "__main__":
