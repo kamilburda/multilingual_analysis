@@ -256,6 +256,8 @@ def _detect_neurons(
         tokenizer,
         language_corpus,
         corpus_sample_size,
+        top_number_attn,
+        top_number_ffn,
         suppress_attention_mask_creation,
 ):
     file_path = os.path.join("corpus_all", language_corpus + ".txt")
@@ -278,6 +280,8 @@ def _detect_neurons(
                 model,
                 tokenizer,
                 prompt,
+                top_number_attn=top_number_attn,
+                top_number_ffn=top_number_ffn,
                 suppress_attention_mask_creation=suppress_attention_mask_creation,
             )
             activate_keys_set_fwd_up.append(activate_keys_fwd_up)
@@ -450,11 +454,22 @@ def _repeat_kv(hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor:
     help="Name of the model for which to detect language-specific neurons.",
 )
 @click.option(
-    "--random-seed",
-    default=112,
+    "--top-number-attn",
+    default=2000,
+    help="Number of neurons with the highest activation values to consider on attention layers.",
+)
+@click.option(
+    "--top-number-ffn",
+    default=1000,
+    help="Number of neurons with the highest activation values to consider on feedforward layers.",
+)
+@click.option(
+    "--attn-implementation",
+    default="eager",
     help=(
-        "Fixed random seed for sampling from the corpus given by --language-corpus."
-        " If you do not wish to use a fixed random seed, use -1."
+        "Attention implementation to use for neuron detection. "
+        "For the list of possible values, see: "
+        "https://huggingface.co/docs/transformers/main_classes/model#transformers.PreTrainedModel.from_pretrained.attn_implementation"
     ),
 )
 @click.option(
@@ -464,12 +479,23 @@ def _repeat_kv(hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor:
         "Suppresses/allows automatic creation of attention masks for consistency with the original repository."
     ),
 )
+@click.option(
+    "--random-seed",
+    default=112,
+    help=(
+        "Fixed random seed for sampling from the corpus given by --language-corpus."
+        " If you do not wish to use a fixed random seed, use -1."
+    ),
+)
 def main(
     language_corpora,
     corpus_sample_size,
     model_name,
-    random_seed,
+    top_number_attn,
+    top_number_ffn,
+    attn_implementation,
     suppress_attention_mask,
+    random_seed,
 ):
     """Detects language-specific neurons based on the method by Zhao et al.: https://arxiv.org/abs/2402.18815
     
@@ -485,7 +511,7 @@ def main(
     model = AutoModelForCausalLM.from_pretrained(
         model_name,
         device_map="auto",
-        attn_implementation="eager",
+        attn_implementation=attn_implementation,
     )
 
     # Force greedy search
@@ -499,8 +525,10 @@ def main(
             tokenizer,
             language_corpus,
             corpus_sample_size,
+            top_number_attn,
+            top_number_ffn,
             suppress_attention_mask,
-        )    
+        )
 
 
 if __name__ == "__main__":
