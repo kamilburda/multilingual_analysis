@@ -196,23 +196,16 @@ def Prompting(
         for layer_index in range(len(module.model.layers)):
             logits_dict[layer_index] = module.lm_head(output.hidden_states[layer_index]).float()
 
-            if FFN_UP in components:
-                activate_keys[FFN_UP][layer_index] = np.argsort(hidden_scores[FFN_UP][layer_index])[-top_number_ffn:][::-1]
+            for component in COMPONENTS:
+                if component in components:
+                    if component.startswith("attn_"):
+                        top_number = top_number_attn
+                    elif component.startswith("ffn_"):
+                        top_number = top_number_ffn
+                    else:
+                        raise AssertionError(f"component '{component}' not supported")
 
-            if FFN_DOWN in components:
-                activate_keys[FFN_DOWN][layer_index] = np.argsort(hidden_scores[FFN_DOWN][layer_index])[-top_number_ffn:][::-1]
-
-            if ATTN_Q in components:
-                activate_keys[ATTN_Q][layer_index] = np.argsort(hidden_scores[ATTN_Q][layer_index])[-top_number_attn:][::-1]
-
-            if ATTN_K in components:
-                activate_keys[ATTN_K][layer_index] = np.argsort(hidden_scores[ATTN_K][layer_index])[-top_number_attn:][::-1]
-
-            if ATTN_V in components:
-                activate_keys[ATTN_V][layer_index] = np.argsort(hidden_scores[ATTN_V][layer_index])[-top_number_attn:][::-1]
-
-            if ATTN_O in components:
-                activate_keys[ATTN_O][layer_index] = np.argsort(hidden_scores[ATTN_O][layer_index])[-top_number_attn:][::-1]
+                    activate_keys[component][layer_index] = np.argsort(hidden_scores[component][layer_index])[-top_number:][::-1]
 
             if combined_data is not None:
                 sorted_items = sorted(combined_data.items(), key=lambda item: item[1])
