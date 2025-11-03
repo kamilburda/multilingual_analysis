@@ -2,6 +2,7 @@ import collections
 import logging
 import math
 import os
+import pickle
 import random
 
 import click
@@ -331,9 +332,8 @@ def _detect_neurons(
 
     os.makedirs(os.path.dirname(file_path), exist_ok=True)
 
-    with open(file_path, 'w') as file:
-        for component in common_elements:
-            file.write(str(common_elements[component]) + '\n')
+    with open(file_path, 'wb') as file:
+        pickle.dump(common_elements, file)
 
 
 def _get_common_elements_for_component(activate_keys_list, component):
