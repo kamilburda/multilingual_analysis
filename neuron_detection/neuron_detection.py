@@ -323,16 +323,23 @@ def _detect_neurons(
     for component in activate_keys_list:
         common_elements[component] = _get_common_elements_for_component(activate_keys_list, component)
 
-    file_path = os.path.join(
+    dirpath = os.path.join(
         "output_neurons",
         *model_name.split('/'),
         language_corpus,
-        f"detected_neurons_{top_number_attn}_{top_number_ffn}_{corpus_sample_size - error_count}.txt",
     )
 
-    os.makedirs(os.path.dirname(file_path), exist_ok=True)
+    os.makedirs(dirpath, exist_ok=True)
 
-    with open(file_path, 'wb') as file:
+    filename_root = f"detected_neurons_{top_number_attn}_{top_number_ffn}_{corpus_sample_size - error_count}"
+
+    filename_text = filename_root + ".txt"
+    with open(os.path.join(dirpath, filename_text), 'w') as file:
+        for component in common_elements:
+            file.write(str(common_elements[component]) + '\n')
+
+    filename_pickle = filename_root + ".pkl"
+    with open(os.path.join(dirpath, filename_pickle), 'wb') as file:
         pickle.dump(common_elements, file)
 
 
