@@ -334,7 +334,7 @@ def _detect_neurons(
         "output_neurons",
         *model_name.split('/'),
         language_corpus,
-        "gsm_2000_12000_" + str(corpus_sample_size - count) + ".txt",
+        f"detected_neurons_{top_number_attn}_{top_number_ffn}_{corpus_sample_size - count}.txt",
     )
 
     os.makedirs(os.path.dirname(file_path), exist_ok=True)
