@@ -61,17 +61,31 @@ def Prompting(
         def mlp_hook(module, args, _output):
             hidden_states = args[0]
 
-            if FFN_UP in components:
-                hidden_scores[FFN_UP][layer_idx] = torch.sum(torch.abs(module.up_proj(hidden_states)), dim=1).squeeze().tolist()
+            up_proj = None
+            gate_proj = None
+            down_proj = None
+
+            if FFN_UP in components or FFN_DOWN in components:
+                up_proj = module.up_proj(hidden_states)
+
+            if FFN_GATE in components or (FFN_DOWN in components and not identical_ffn_up_and_down):
+                gate_proj = module.act_fn(module.gate_proj(hidden_states))
 
             if FFN_DOWN in components:
                 if identical_ffn_up_and_down:
-                    hidden_states_proj = module.up_proj(hidden_states)
+                    down_proj = up_proj
                 else:
-                    hidden_states_proj = module.down_proj(hidden_states)
+                    down_proj = module.down_proj(gate_proj * up_proj)
 
-                hidden_scores[FFN_DOWN][layer_idx] = torch.sum(torch.abs(hidden_states_proj), dim=1).squeeze().tolist()
-        
+            if FFN_UP in components:
+                hidden_scores[FFN_UP][layer_idx] = torch.sum(torch.abs(up_proj), dim=1).squeeze().tolist()
+
+            if FFN_GATE in components:
+                hidden_scores[FFN_GATE][layer_idx] = torch.sum(torch.abs(gate_proj), dim=1).squeeze().tolist()
+
+            if FFN_DOWN in components:
+                hidden_scores[FFN_DOWN][layer_idx] = torch.sum(torch.abs(down_proj), dim=1).squeeze().tolist()
+
         return mlp_hook
 
 
