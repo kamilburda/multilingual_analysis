@@ -1,4 +1,5 @@
 import collections
+import gc
 import logging
 import math
 import os
@@ -318,6 +319,9 @@ def _detect_neurons(
         else:
             for component in activate_keys:
                 activate_keys_list[component].append(activate_keys[component])
+        finally:
+            torch.cuda.empty_cache()
+            gc.collect()
 
     common_elements = {}
     for component in activate_keys_list:
