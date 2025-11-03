@@ -455,12 +455,12 @@ def _repeat_kv(hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor:
 )
 @click.option(
     "--top-number-attn",
-    default=2000,
+    default=1000,
     help="Number of neurons with the highest activation values to consider on attention layers.",
 )
 @click.option(
     "--top-number-ffn",
-    default=1000,
+    default=2000,
     help="Number of neurons with the highest activation values to consider on feedforward layers.",
 )
 @click.option(
