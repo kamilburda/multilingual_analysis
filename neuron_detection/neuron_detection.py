@@ -12,10 +12,30 @@ from tqdm import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 
+COMPONENTS = (
+    ATTN_Q,
+    ATTN_K,
+    ATTN_V,
+    ATTN_O,
+    FFN_UP,
+    FFN_GATE,
+    FFN_DOWN,
+) = (
+    "attn_q",
+    "attn_k",
+    "attn_v",
+    "attn_o",
+    "ffn_up",
+    "ffn_gate",
+    "ffn_down",
+)
+
+
 def Prompting(
         model,
         tokenizer,
         prompt,
+        components,
         top_number_attn: int = 1000,
         top_number_ffn: int = 2000,
         top_number_layer: int = 24,
@@ -24,21 +44,10 @@ def Prompting(
     inputs = tokenizer(prompt, return_tensors="pt").to("cuda")
 
     hidden_states_as_lists = collections.defaultdict(list)
+    hidden_scores = collections.defaultdict(dict)
+    activate_keys = collections.defaultdict(dict)
     logits_dict = {}
-    activate_keys_fwd_up = {}
-    activate_keys_fwd_down = {}
-    activate_keys_q = {}
-    activate_keys_k = {}
-    activate_keys_v = {}
-    activate_keys_o = {}
-    layer_keys = {}
-
-    hidden_scores_fwd_up = {}
-    hidden_scores_fwd_down = {}
-    hidden_scores_q = {}
-    hidden_scores_k = {}
-    hidden_scores_v = {}
-    hidden_scores_o = {}
+    layer_keys = []
 
 
     def remove_attention_mask_pre_hook(_module, _args, kwargs):
@@ -50,8 +59,11 @@ def Prompting(
         def mlp_hook(module, args, _output):
             hidden_states = args[0]
 
-            hidden_scores_fwd_up[layer_idx] = torch.sum(torch.abs(module.up_proj(hidden_states)), dim=1).squeeze().tolist()
-            hidden_scores_fwd_down[layer_idx] = torch.sum(torch.abs(module.up_proj(hidden_states)), dim=1).squeeze().tolist()
+            if FFN_UP in components:
+                hidden_scores[FFN_UP][layer_idx] = torch.sum(torch.abs(module.up_proj(hidden_states)), dim=1).squeeze().tolist()
+
+            if FFN_DOWN in components:
+                hidden_scores[FFN_DOWN][layer_idx] = torch.sum(torch.abs(module.up_proj(hidden_states)), dim=1).squeeze().tolist()
         
         return mlp_hook
 
@@ -62,6 +74,8 @@ def Prompting(
 
         # Most of the code is copied from transformers.models.mistral.modeling_mistral.MistralAttention.forward()
         def self_attn_hook(module, _args, kwargs, output):
+            nonlocal hidden_scores
+
             hidden_states = kwargs["hidden_states"]
             attention_mask = kwargs.get("attention_mask")
 
@@ -148,10 +162,14 @@ def Prompting(
 
             attn_output = module.o_proj(attn_output)
 
-            hidden_scores_q[layer_idx] = attn_weights_temp.squeeze().tolist()
-            hidden_scores_k[layer_idx] = attn_weights_temp.squeeze().tolist()
-            hidden_scores_v[layer_idx] = torch.sum(torch.abs(attn_output_temp), dim=1).squeeze().tolist()
-            hidden_scores_o[layer_idx] = torch.sum(torch.abs(attn_output_o), dim=1).squeeze().tolist()
+            if ATTN_Q in COMPONENTS:
+                hidden_scores[ATTN_Q][layer_idx] = attn_weights_temp.squeeze().tolist()
+            if ATTN_K in COMPONENTS:
+                hidden_scores[ATTN_K][layer_idx] = attn_weights_temp.squeeze().tolist()
+            if ATTN_V in COMPONENTS:
+                hidden_scores[ATTN_V][layer_idx] = torch.sum(torch.abs(attn_output_temp), dim=1).squeeze().tolist()
+            if ATTN_O in COMPONENTS:
+                hidden_scores[ATTN_O][layer_idx] = torch.sum(torch.abs(attn_output_o), dim=1).squeeze().tolist()
 
             return orig_attn_output, orig_attn_weights, orig_past_key_value
 
@@ -159,30 +177,48 @@ def Prompting(
 
 
     def store_activated_neurons_hook(module, _args, output):
-        nonlocal hidden_states_as_lists, logits_dict, activate_keys_fwd_up, activate_keys_fwd_down, activate_keys_q, activate_keys_k, activate_keys_v, activate_keys_o, layer_keys
+        nonlocal hidden_states_as_lists, activate_keys, logits_dict, layer_keys
 
-        summed_data_fwd = {key: sum(value) for key, value in hidden_scores_fwd_up.items()}
-        summed_data_q = {key: sum(value) for key, value in hidden_scores_q.items()}
-        summed_data_v = {key: sum(value) for key, value in hidden_scores_v.items()}
+        summed_data = collections.defaultdict(dict)
+        components_for_combined_data = [FFN_UP, ATTN_Q, ATTN_V]
 
-        combined_data = {key: summed_data_fwd[key] * 3 + summed_data_q[key] * 2 + summed_data_v[key] * 2 for key in summed_data_fwd}
+        if all(component in components for component in components_for_combined_data):
+            for component_ in components_for_combined_data:
+                summed_data[component_] = {key: sum(value) for key, value in hidden_scores[component_].items()}
+
+            combined_data = {
+                key: summed_data[FFN_UP][key] * 3 + summed_data[ATTN_Q][key] * 2 + summed_data[ATTN_V][key] * 2
+                for key in summed_data[FFN_UP]
+            }
+        else:
+            combined_data = None
 
         for layer_index in range(len(module.model.layers)):
             logits_dict[layer_index] = module.lm_head(output.hidden_states[layer_index]).float()
-            top_indices = np.argsort(hidden_scores_fwd_up[layer_index])[-top_number_ffn:][::-1]
-            activate_keys_fwd_up[layer_index] = top_indices
-            top_indices = np.argsort(hidden_scores_fwd_down[layer_index])[-top_number_ffn:][::-1]
-            activate_keys_fwd_down[layer_index] = top_indices
-            top_indices = np.argsort(hidden_scores_q[layer_index])[-top_number_attn:][::-1]
-            activate_keys_q[layer_index] = top_indices
-            top_indices = np.argsort(hidden_scores_k[layer_index])[-top_number_attn:][::-1]
-            activate_keys_k[layer_index] = top_indices
-            top_indices = np.argsort(hidden_scores_v[layer_index])[-top_number_attn:][::-1]
-            activate_keys_v[layer_index] = top_indices
-            top_indices = np.argsort(hidden_scores_o[layer_index])[-top_number_attn:][::-1]
-            activate_keys_o[layer_index] = top_indices
-            sorted_items = sorted(combined_data.items(), key=lambda item: item[1])
-            layer_keys = [item[0] for item in sorted_items[-top_number_layer:]]
+
+            if FFN_UP in components:
+                activate_keys[FFN_UP][layer_index] = np.argsort(hidden_scores[FFN_UP][layer_index])[-top_number_ffn:][::-1]
+
+            if FFN_DOWN in components:
+                activate_keys[FFN_DOWN][layer_index] = np.argsort(hidden_scores[FFN_DOWN][layer_index])[-top_number_ffn:][::-1]
+
+            if ATTN_Q in components:
+                activate_keys[ATTN_Q][layer_index] = np.argsort(hidden_scores[ATTN_Q][layer_index])[-top_number_attn:][::-1]
+
+            if ATTN_K in components:
+                activate_keys[ATTN_K][layer_index] = np.argsort(hidden_scores[ATTN_K][layer_index])[-top_number_attn:][::-1]
+
+            if ATTN_V in components:
+                activate_keys[ATTN_V][layer_index] = np.argsort(hidden_scores[ATTN_V][layer_index])[-top_number_attn:][::-1]
+
+            if ATTN_O in components:
+                activate_keys[ATTN_O][layer_index] = np.argsort(hidden_scores[ATTN_O][layer_index])[-top_number_attn:][::-1]
+
+            if combined_data is not None:
+                sorted_items = sorted(combined_data.items(), key=lambda item: item[1])
+                layer_keys = [item[0] for item in sorted_items[-top_number_layer:]]
+            else:
+                layer_keys = []
 
         # TODO: This may not yield the same results as embedding this code inside `model._sample()` in case of multiple GPUs.
         for layer_index, logit in logits_dict.items():
@@ -247,7 +283,7 @@ def Prompting(
     answer = tokenizer.decode(outputs[0][0]).replace('<pad> ', '')
     answer = answer.replace('</s>', '')
     
-    return hidden_embed, answer, activate_keys_fwd_up, activate_keys_fwd_down, activate_keys_q, activate_keys_k, activate_keys_v, activate_keys_o, layer_keys
+    return hidden_embed, answer, activate_keys, layer_keys
 
 
 def _detect_neurons(
@@ -256,6 +292,7 @@ def _detect_neurons(
         tokenizer,
         language_corpus,
         corpus_sample_size,
+        components,
         top_number_attn,
         top_number_ffn,
         suppress_attention_mask_creation,
@@ -266,97 +303,32 @@ def _detect_neurons(
     lines = [line.strip() for line in lines]
     lines = random.sample(lines, corpus_sample_size)
 
-    activate_keys_set_fwd_up = []
-    activate_keys_set_fwd_down = []
-    activate_keys_set_q = []
-    activate_keys_set_k = []
-    activate_keys_set_v = []
+    activate_keys_list = collections.defaultdict(list)
 
     count = 0
 
     for prompt in tqdm(lines):
         try:
-            hidden_embed, answer, activate_keys_fwd_up, activate_keys_fwd_down, activate_keys_q, activate_keys_k, activate_keys_v, _, _ = Prompting(
+            hidden_embed, answer, activate_keys, _ = Prompting(
                 model,
                 tokenizer,
                 prompt,
+                components,
                 top_number_attn=top_number_attn,
                 top_number_ffn=top_number_ffn,
                 suppress_attention_mask_creation=suppress_attention_mask_creation,
             )
-            activate_keys_set_fwd_up.append(activate_keys_fwd_up)
-            activate_keys_set_fwd_down.append(activate_keys_fwd_down)
-            activate_keys_set_q.append(activate_keys_q)
-            activate_keys_set_k.append(activate_keys_k)
-            activate_keys_set_v.append(activate_keys_v)
         except torch.cuda.OutOfMemoryError as e:
             count += 1
-            # Handle the OutOfMemoryError here
             print(count)
             print(e)
+        else:
+            for component in activate_keys:
+                activate_keys_list[component].append(activate_keys[component])
 
-    # Initialize dictionary for common elements
-    common_elements_dict_fwd_up = {}
-    common_elements_dict_fwd_down = {}
-    common_elements_dict_q = {}
-    common_elements_dict_k = {}
-    common_elements_dict_v = {}
-
-    # Iterate through the keys of the first dictionary
-    for key in activate_keys_set_fwd_up[0].keys():
-        # Check if the key exists in all dictionaries
-        if all(key in d for d in activate_keys_set_fwd_up):
-            # Extract corresponding arrays and find common elements
-            arrays = [d[key] for d in activate_keys_set_fwd_up]
-            common_elements = set.intersection(*map(set, arrays))
-
-            # Add common elements to the dictionary
-            common_elements_dict_fwd_up[key] = common_elements
-    # print(common_elements_dict_fwd_up)
-
-    for key in activate_keys_set_fwd_down[0].keys():
-        # Check if the key exists in all dictionaries
-        if all(key in d for d in activate_keys_set_fwd_down):
-            # Extract corresponding arrays and find common elements
-            arrays = [d[key] for d in activate_keys_set_fwd_down]
-            common_elements = set.intersection(*map(set, arrays))
-
-            # Add common elements to the dictionary
-            common_elements_dict_fwd_down[key] = common_elements
-    # print(common_elements_dict_fwd_down)
-
-    for key in activate_keys_set_q[0].keys():
-        # Check if the key exists in all dictionaries
-        if all(key in d for d in activate_keys_set_q):
-            # Extract corresponding arrays and find common elements
-            arrays = [d[key] for d in activate_keys_set_q]
-            common_elements = set.intersection(*map(set, arrays))
-
-            # Add common elements to the dictionary
-            common_elements_dict_q[key] = common_elements
-    # print(common_elements_dict_q)
-
-    for key in activate_keys_set_k[0].keys():
-        # Check if the key exists in all dictionaries
-        if all(key in d for d in activate_keys_set_k):
-            # Extract corresponding arrays and find common elements
-            arrays = [d[key] for d in activate_keys_set_k]
-            common_elements = set.intersection(*map(set, arrays))
-
-            # Add common elements to the dictionary
-            common_elements_dict_k[key] = common_elements
-    # print(common_elements_dict_k)
-
-    for key in activate_keys_set_v[0].keys():
-        # Check if the key exists in all dictionaries
-        if all(key in d for d in activate_keys_set_v):
-            # Extract corresponding arrays and find common elements
-            arrays = [d[key] for d in activate_keys_set_v]
-            common_elements = set.intersection(*map(set, arrays))
-
-            # Add common elements to the dictionary
-            common_elements_dict_v[key] = common_elements
-    # print(common_elements_dict_v)
+    common_elements = {}
+    for component in activate_keys_list:
+        common_elements[component] = _get_common_elements_for_component(activate_keys_list, component)
 
     file_path = os.path.join(
         "output_neurons",
@@ -368,11 +340,20 @@ def _detect_neurons(
     os.makedirs(os.path.dirname(file_path), exist_ok=True)
 
     with open(file_path, 'w') as file:
-        file.write(str(common_elements_dict_fwd_up) + '\n')
-        file.write(str(common_elements_dict_fwd_down) + '\n')
-        file.write(str(common_elements_dict_q) + '\n')
-        file.write(str(common_elements_dict_k) + '\n')
-        file.write(str(common_elements_dict_v) + '\n')
+        for component in common_elements:
+            file.write(str(common_elements[component]) + '\n')
+
+
+def _get_common_elements_for_component(activate_keys_list, component):
+    common_elements = {}
+
+    for key in activate_keys_list[component][0]:
+        if all(key in d for d in activate_keys_list[component]):
+            # Extract corresponding arrays and find common elements
+            arrays = [d[key] for d in activate_keys_list[component]]
+            common_elements[key] = set.intersection(*map(set, arrays))
+
+    return common_elements
 
 
 # Copied from transformers.models.llama.modeling_llama.apply_rotary_pos_emb
@@ -439,7 +420,7 @@ def _repeat_kv(hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor:
     "--language-corpus",
     "-c",
     "language_corpora",
-    default=["english"],
+    default=("english",),
     multiple=True,
     help="Language(s) for which to load a corpus.",
 )
@@ -452,6 +433,21 @@ def _repeat_kv(hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor:
     "--model-name",
     default="mistralai/Mistral-7B-Instruct-v0.2",
     help="Name of the model for which to detect language-specific neurons.",
+)
+@click.option(
+    "--component",
+    "-o",
+    "components",
+    default=(
+        ATTN_Q,
+        ATTN_K,
+        ATTN_V,
+        FFN_UP,
+        FFN_DOWN,
+    ),
+    type=click.Choice(COMPONENTS),
+    multiple=True,
+    help="Component(s) to detect neurons in.",
 )
 @click.option(
     "--top-number-attn",
@@ -491,6 +487,7 @@ def main(
     language_corpora,
     corpus_sample_size,
     model_name,
+    components,
     top_number_attn,
     top_number_ffn,
     attn_implementation,
@@ -525,6 +522,7 @@ def main(
             tokenizer,
             language_corpus,
             corpus_sample_size,
+            components,
             top_number_attn,
             top_number_ffn,
             suppress_attention_mask,
