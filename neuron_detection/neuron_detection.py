@@ -304,7 +304,7 @@ def _detect_neurons(
 
     for prompt in tqdm(lines):
         try:
-            hidden_embed, answer, activate_keys, _ = Prompting(
+            _hidden_embed, _answer, activate_keys, _layer_keys = Prompting(
                 model,
                 tokenizer,
                 prompt,
