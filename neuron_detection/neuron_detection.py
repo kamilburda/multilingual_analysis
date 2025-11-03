@@ -305,7 +305,7 @@ def _detect_neurons(
 
     activate_keys_list = collections.defaultdict(list)
 
-    count = 0
+    error_count = 0
 
     for prompt in tqdm(lines):
         try:
@@ -319,9 +319,8 @@ def _detect_neurons(
                 suppress_attention_mask_creation=suppress_attention_mask_creation,
             )
         except torch.cuda.OutOfMemoryError as e:
-            count += 1
-            print(count)
-            print(e)
+            error_count += 1
+            print(f"Encountered the following error: {e}")
         else:
             for component in activate_keys:
                 activate_keys_list[component].append(activate_keys[component])
@@ -334,7 +333,7 @@ def _detect_neurons(
         "output_neurons",
         *model_name.split('/'),
         language_corpus,
-        f"detected_neurons_{top_number_attn}_{top_number_ffn}_{corpus_sample_size - count}.txt",
+        f"detected_neurons_{top_number_attn}_{top_number_ffn}_{corpus_sample_size - error_count}.txt",
     )
 
     os.makedirs(os.path.dirname(file_path), exist_ok=True)
