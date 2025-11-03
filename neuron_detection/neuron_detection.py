@@ -41,6 +41,7 @@ def Prompting(
         top_number_ffn: int = 2000,
         top_number_layer: int = 24,
         suppress_attention_mask_creation: bool = True,
+        identical_ffn_up_and_down: bool = True,
 ):
     inputs = tokenizer(prompt, return_tensors="pt").to("cuda")
 
@@ -64,7 +65,12 @@ def Prompting(
                 hidden_scores[FFN_UP][layer_idx] = torch.sum(torch.abs(module.up_proj(hidden_states)), dim=1).squeeze().tolist()
 
             if FFN_DOWN in components:
-                hidden_scores[FFN_DOWN][layer_idx] = torch.sum(torch.abs(module.up_proj(hidden_states)), dim=1).squeeze().tolist()
+                if identical_ffn_up_and_down:
+                    hidden_states_proj = module.up_proj(hidden_states)
+                else:
+                    hidden_states_proj = module.down_proj(hidden_states)
+
+                hidden_scores[FFN_DOWN][layer_idx] = torch.sum(torch.abs(hidden_states_proj), dim=1).squeeze().tolist()
         
         return mlp_hook
 
@@ -290,6 +296,7 @@ def _detect_neurons(
         top_number_attn,
         top_number_ffn,
         suppress_attention_mask_creation,
+        identical_ffn_up_and_down,
 ):
     file_path = os.path.join("corpus_all", language_corpus + ".txt")
     with open(file_path, 'r') as file:
@@ -311,6 +318,7 @@ def _detect_neurons(
                 top_number_attn=top_number_attn,
                 top_number_ffn=top_number_ffn,
                 suppress_attention_mask_creation=suppress_attention_mask_creation,
+                identical_ffn_up_and_down=identical_ffn_up_and_down,
             )
         except torch.cuda.OutOfMemoryError as e:
             error_count += 1
@@ -475,6 +483,13 @@ def _repeat_kv(hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor:
     ),
 )
 @click.option(
+    "--identical-ffn-up-and-down/--no-identical-ffn-up-and-down",
+    default=True,
+    help=(
+        "Produces the same detected neurons for both the up- and down-projection from MLP layers."
+    ),
+)
+@click.option(
     "--random-seed",
     default=112,
     help=(
@@ -491,6 +506,7 @@ def main(
     top_number_ffn,
     attn_implementation,
     suppress_attention_mask,
+    identical_ffn_up_and_down,
     random_seed,
 ):
     """Detects language-specific neurons based on the method by Zhao et al.: https://arxiv.org/abs/2402.18815
@@ -525,6 +541,7 @@ def main(
             top_number_attn,
             top_number_ffn,
             suppress_attention_mask,
+            identical_ffn_up_and_down,
         )
 
 
