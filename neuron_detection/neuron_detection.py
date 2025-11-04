@@ -240,20 +240,25 @@ def Prompting(
 
 
     mlp_handles = []
-    for index, layer in enumerate(model.model.layers):
-        mlp_handles.append(
-            layer.mlp.register_forward_hook(
-                mlp_hook_with_layer_idx(layer_idx=index),
+
+    if not any(component.startswith("ffn_") for component in components):
+        for index, layer in enumerate(model.model.layers):
+            mlp_handles.append(
+                layer.mlp.register_forward_hook(
+                    mlp_hook_with_layer_idx(layer_idx=index),
+                )
             )
-        )
+    
     self_attn_handles = []
-    for index, layer in enumerate(model.model.layers):
-        self_attn_handles.append(
-            layer.self_attn.register_forward_hook(
-                self_attn_hook_with_layer_idx(layer_idx=index),
-                with_kwargs=True,
+    if not any(component.startswith("attn_") for component in components):
+        for index, layer in enumerate(model.model.layers):
+            self_attn_handles.append(
+                layer.self_attn.register_forward_hook(
+                    self_attn_hook_with_layer_idx(layer_idx=index),
+                    with_kwargs=True,
+                )
             )
-        )
+
     remove_attention_mask_handles = []
     if suppress_attention_mask_creation:
         for index, layer in enumerate(model.model.layers):
@@ -271,6 +276,7 @@ def Prompting(
             )
         remove_attention_mask_handles.append(model.register_forward_pre_hook(remove_attention_mask_pre_hook, with_kwargs=True))
     store_activated_neurons_handle = model.register_forward_hook(store_activated_neurons_hook)
+
     try:
         outputs = model.generate(
             input_ids=inputs.input_ids,
