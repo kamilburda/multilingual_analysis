@@ -239,42 +239,42 @@ def Prompting(
             hidden_states_as_lists[layer_index].append(torch.argmax(logit, dim=-1))
 
 
-    mlp_handles = []
+    handles = []
+
     if any(component.startswith("ffn_") for component in components):
         for index, layer in enumerate(model.model.layers):
-            mlp_handles.append(
+            handles.append(
                 layer.mlp.register_forward_hook(
                     mlp_hook_with_layer_idx(layer_idx=index),
                 )
             )
-    
-    self_attn_handles = []
+
     if any(component.startswith("attn_") for component in components):
         for index, layer in enumerate(model.model.layers):
-            self_attn_handles.append(
+            handles.append(
                 layer.self_attn.register_forward_hook(
                     self_attn_hook_with_layer_idx(layer_idx=index),
                     with_kwargs=True,
                 )
             )
 
-    remove_attention_mask_handles = []
     if suppress_attention_mask_creation:
         for index, layer in enumerate(model.model.layers):
-            remove_attention_mask_handles.append(
+            handles.append(
                 layer.register_forward_pre_hook(
                     remove_attention_mask_pre_hook,
                     with_kwargs=True,
                 )
             )
-            remove_attention_mask_handles.append(
+            handles.append(
                 layer.self_attn.register_forward_pre_hook(
                     remove_attention_mask_pre_hook,
                     with_kwargs=True,
                 )
             )
-        remove_attention_mask_handles.append(model.register_forward_pre_hook(remove_attention_mask_pre_hook, with_kwargs=True))
-    store_activated_neurons_handle = model.register_forward_hook(store_activated_neurons_hook)
+        handles.append(model.register_forward_pre_hook(remove_attention_mask_pre_hook, with_kwargs=True))
+
+    handles.append(model.register_forward_hook(store_activated_neurons_hook))
 
     try:
         outputs = model.generate(
@@ -284,13 +284,8 @@ def Prompting(
             output_hidden_states=True,
         )
     finally:
-        for handle in mlp_handles:
+        for handle in handles:
             handle.remove()
-        for handle in self_attn_handles:
-            handle.remove()
-        for handle in remove_attention_mask_handles:
-            handle.remove()
-        store_activated_neurons_handle.remove()
 
     hidden_states = {}
     for layer_index in hidden_states_as_lists:
