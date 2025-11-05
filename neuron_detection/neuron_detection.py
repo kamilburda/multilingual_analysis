@@ -241,7 +241,7 @@ def Prompting(
 
     mlp_handles = []
 
-    if not any(component.startswith("ffn_") for component in components):
+    if any(component.startswith("ffn_") for component in components):
         for index, layer in enumerate(model.model.layers):
             mlp_handles.append(
                 layer.mlp.register_forward_hook(
@@ -250,7 +250,7 @@ def Prompting(
             )
     
     self_attn_handles = []
-    if not any(component.startswith("attn_") for component in components):
+    if any(component.startswith("attn_") for component in components):
         for index, layer in enumerate(model.model.layers):
             self_attn_handles.append(
                 layer.self_attn.register_forward_hook(
