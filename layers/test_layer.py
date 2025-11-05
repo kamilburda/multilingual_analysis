@@ -28,6 +28,7 @@ def Prompting(
         model,
         tokenizer,
         prompt,
+        top_k: int = 10,
         max_new_tokens: Optional[int] = 64,
 ):
     if max_new_tokens == 0:
@@ -50,7 +51,7 @@ def Prompting(
 
         # TODO: This may not yield the same results as embedding this code inside `model._sample()` in case of multiple GPUs.
         for layer_index, logit in logits_dict.items():
-            _topk_values, topk_indices = torch.topk(logit, 10, dim=-1)
+            _topk_values, topk_indices = torch.topk(logit, top_k, dim=-1)
             hidden_states_as_lists[layer_index].append(topk_indices.view(*topk_indices.shape[:-2], -1))
 
 
@@ -321,6 +322,11 @@ prompts["ms"] = [
 
 @click.command()
 @click.option(
+    "--top-k",
+    default=10,
+    help="Limits the next token selection to this many tokens during generation.",
+)
+@click.option(
     "--max-new-tokens",
     default=64,
     help="Maximum number of tokens to generate. Set to 0 to ignore.",
@@ -347,6 +353,7 @@ prompts["ms"] = [
     default=112,
 )
 def main(
+    top_k,
     max_new_tokens,
     model_name,
     english_only,
@@ -376,6 +383,7 @@ def main(
             model,
             tokenizer,
             prompt,
+            top_k=top_k,
             max_new_tokens=max_new_tokens,
         )
         lang_stats = layerwise_lang_stats(hidden_embed_token_level, candidate_langs)
