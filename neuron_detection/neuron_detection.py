@@ -240,7 +240,6 @@ def Prompting(
 
 
     mlp_handles = []
-
     if any(component.startswith("ffn_") for component in components):
         for index, layer in enumerate(model.model.layers):
             mlp_handles.append(
