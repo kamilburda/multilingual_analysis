@@ -4,92 +4,57 @@ This repository contains code for the paper "[How do Large Language Models Handl
 
 <img src="./figures/mwork.png" alt="./" style="zoom:63%;" />
 
-## Layer Embedding Decoding
-
-### Installation
+## Installation
 
 The package can be installed by running the following command at the root of this repository: 
 
 ```shell
 conda create -n SeaExam python=3.9
-conda activate Layers
+conda activate SeaExam
 pip install -r requirement.txt
 ```
 
-### Running
+## Layer Embedding Decoding
 
-Figure 1 in the paper is obtained by decoding the embedding by decoding the hidden embeddings of each layer to tokens within the LLM’s vocabulary. Specifically, codes are in `./layer`, where the `test_layer.py` is the function while for other files you need to **change transformers package**. Use the following command to run the experiment.
+Figure 1 in the paper is obtained by decoding the embedding by decoding the hidden embeddings of each layer to tokens within the LLM's vocabulary.
+
+Use the following command to run the experiment:
 
 ```sh
 cd layers
 python test_layer.py
 ```
 
-### Parameters
+For possible command parameters, run
 
-1. **Model layers**
-
-   **Note that you need to change `candidate_premature_layers` and `candidate_langs` in  `test_layer.py`; `early_exit_layers` of `./transformers/models/{model_name}/modeling_{model_name}.py` and `early_exit_layers`  in `./generation/utils.py`, to corresponding layer index list.** For example, for llama3, ``candidate_premature_layers`` must be set as
-
-   ```python
-   candidate_premature_layers = [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31]
-   ```
-
-2. **Top-k tokens**
-
-   To keep the generalization of decoded tokens, we normally decode top-k tokens on each position, which is set as follows in `/generation/utils.py`
-
-   ```python
-   topk_values, topk_indices = torch.topk(logit, 100, dim=-1)
-   ```
+```sh
+python test_layer.py --help
+```
 
 <img src="./figures/layer.png" alt="./" style="zoom:80%;" />
 
 ## Neuron Detection (PLND) 
 
-We provide codes for detecting neurons in Llama, Mistral and Gemma.
+Neuron detection is supported for Llama, Mistral and Gemma.
 
-### Installation
-
-The package can be installed by running the following command at the root of this repository: 
-
-```shell
-conda create -n SeaExam python=3.9
-conda activate Neuron
-pip install -r requirement.txt
-```
-
-### Running
-
-Detect corpus is stored in `./neuron_detection/corpus_all`, while similar to previous settings, we need to  **change transformers package**. When detecting, we need to define the language and number of documents used to detect. Detected neurons will be stored in folder `./output_neurons`.
+The corpus for neuron detection is stored in `./neuron_detection/corpus_all`.
 
 ```sh
-cd /neuron_detection
-python neuron_detection.py english 1000
+cd neuron_detection
+python neuron_detection.py
 ```
 
-### Parameters
+For possible command parameters, run
 
-**Number of Top-k neurons in each layer**
-
-```python
-top_number_attn = 1000
-top_number_ffn = 2000
+```sh
+python neuron_detection.py --help
 ```
+
+The detected neurons will be stored in folder `./output_neurons`.
 
 ## Neuron Deactivation
 
 We provide codes for detecting neurons in Llama, Mistral and Gemma.
-
-### Installation
-
-The package can be installed by running the following command at the root of this repository: 
-
-```shell
-conda create -n SeaExam python=3.9
-conda activate Deactivate
-pip install -r requirement.txt
-```
 
 ### Running
 
@@ -103,16 +68,6 @@ python test_mistral_gsm.py {language} {understanding layer} {generation layer} {
 ## Neuron Specific Enhancement
 
 Neuron specific tuning code is the same for all models.
-
-### Installation
-
-The package can be installed by running the following command at the root of this repository: 
-
-```shell
-conda create -n SeaExam python=3.9
-conda activate Enhance
-pip install -r requirement.txt
-```
 
 ### Running
 
