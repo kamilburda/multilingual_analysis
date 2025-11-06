@@ -35,7 +35,7 @@ python test_layer.py --help
 
 ## Neuron Detection (PLND) 
 
-Neuron detection is supported for Llama, Mistral and Gemma.
+Neuron detection for MLP components is supported for arbitrary models. For attention components, neuron detection is supported for Llama, Mistral and Gemma.
 
 The corpus for neuron detection is stored in `./neuron_detection/corpus_all`.
 
@@ -44,7 +44,7 @@ cd neuron_detection
 python neuron_detection.py
 ```
 
-For possible command parameters, run
+For possible command parameters and components to detect neurons in, run
 
 ```sh
 python neuron_detection.py --help
