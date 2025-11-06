@@ -1,6 +1,7 @@
 import collections
 import logging
 import math
+import operator
 import os
 import pickle
 import random
@@ -13,22 +14,26 @@ from tqdm import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 
-COMPONENTS = (
+ATTN_COMPONENTS = (
     ATTN_Q,
     ATTN_K,
     ATTN_V,
     ATTN_O,
-    FFN_UP,
-    FFN_GATE,
-    FFN_DOWN,
 ) = (
     "attn_q",
     "attn_k",
     "attn_v",
     "attn_o",
-    "ffn_up",
-    "ffn_gate",
-    "ffn_down",
+)
+
+_ATTN_COMPONENTS_STR = ', '.join(f"'{component}'" for component in ATTN_COMPONENTS)
+
+DEFAULT_COMPONENTS = (
+    ATTN_Q,
+    ATTN_K,
+    ATTN_V,
+    "mlp.up_proj",
+    "mlp.down_proj",
 )
 
 
@@ -41,7 +46,6 @@ def Prompting(
         top_number_ffn: int = 2000,
         top_number_layer: int = 24,
         suppress_attention_mask_creation: bool = True,
-        identical_ffn_up_and_down: bool = True,
 ):
     inputs = tokenizer(prompt, return_tensors="pt").to("cuda")
 
@@ -55,38 +59,12 @@ def Prompting(
     def remove_attention_mask_pre_hook(_module, _args, kwargs):
         kwargs["attention_mask"] = None
 
+    def component_hook_with_layer_idx(component, layer_idx):
 
-    def mlp_hook_with_layer_idx(layer_idx):
+        def hook(module, _args, output):
+            hidden_scores[component][layer_idx] = torch.sum(torch.abs(output), dim=1).squeeze().tolist()
 
-        def mlp_hook(module, args, _output):
-            hidden_states = args[0]
-
-            up_proj = None
-            gate_proj = None
-            down_proj = None
-
-            if FFN_UP in components or FFN_DOWN in components:
-                up_proj = module.up_proj(hidden_states)
-
-            if FFN_GATE in components or (FFN_DOWN in components and not identical_ffn_up_and_down):
-                gate_proj = module.act_fn(module.gate_proj(hidden_states))
-
-            if FFN_DOWN in components:
-                if identical_ffn_up_and_down:
-                    down_proj = up_proj
-                else:
-                    down_proj = module.down_proj(gate_proj * up_proj)
-
-            if FFN_UP in components:
-                hidden_scores[FFN_UP][layer_idx] = torch.sum(torch.abs(up_proj), dim=1).squeeze().tolist()
-
-            if FFN_GATE in components:
-                hidden_scores[FFN_GATE][layer_idx] = torch.sum(torch.abs(gate_proj), dim=1).squeeze().tolist()
-
-            if FFN_DOWN in components:
-                hidden_scores[FFN_DOWN][layer_idx] = torch.sum(torch.abs(down_proj), dim=1).squeeze().tolist()
-
-        return mlp_hook
+        return hook
 
 
     # While `*Attention` classes have a `layer_idx` attribute, we pass the layer index
@@ -183,13 +161,13 @@ def Prompting(
 
             attn_output = module.o_proj(attn_output)
 
-            if ATTN_Q in COMPONENTS:
+            if ATTN_Q in components:
                 hidden_scores[ATTN_Q][layer_idx] = attn_weights_temp.squeeze().tolist()
-            if ATTN_K in COMPONENTS:
+            if ATTN_K in components:
                 hidden_scores[ATTN_K][layer_idx] = attn_weights_temp.squeeze().tolist()
-            if ATTN_V in COMPONENTS:
+            if ATTN_V in components:
                 hidden_scores[ATTN_V][layer_idx] = torch.sum(torch.abs(attn_output_temp), dim=1).squeeze().tolist()
-            if ATTN_O in COMPONENTS:
+            if ATTN_O in components:
                 hidden_scores[ATTN_O][layer_idx] = torch.sum(torch.abs(attn_output_o), dim=1).squeeze().tolist()
 
             return orig_attn_output, orig_attn_weights, orig_past_key_value
@@ -201,15 +179,15 @@ def Prompting(
         nonlocal hidden_states_as_lists, activate_keys, logits_dict, layer_keys
 
         summed_data = collections.defaultdict(dict)
-        components_for_combined_data = [FFN_UP, ATTN_Q, ATTN_V]
+        components_for_combined_data = ["mlp.up_proj", ATTN_Q, ATTN_V]
 
         if all(component in components for component in components_for_combined_data):
             for component_ in components_for_combined_data:
                 summed_data[component_] = {key: sum(value) for key, value in hidden_scores[component_].items()}
 
             combined_data = {
-                key: summed_data[FFN_UP][key] * 3 + summed_data[ATTN_Q][key] * 2 + summed_data[ATTN_V][key] * 2
-                for key in summed_data[FFN_UP]
+                key: summed_data["mlp.up_proj"][key] * 3 + summed_data[ATTN_Q][key] * 2 + summed_data[ATTN_V][key] * 2
+                for key in summed_data["mlp.up_proj"]
             }
         else:
             combined_data = None
@@ -217,16 +195,15 @@ def Prompting(
         for layer_index in range(len(module.model.layers)):
             logits_dict[layer_index] = module.lm_head(output.hidden_states[layer_index]).float()
 
-            for component in COMPONENTS:
-                if component in components:
-                    if component.startswith("attn_"):
-                        top_number = top_number_attn
-                    elif component.startswith("ffn_"):
-                        top_number = top_number_ffn
-                    else:
-                        raise AssertionError(f"component '{component}' not supported")
+            for component in components:
+                if component.startswith("attn_") or component.startswith("self_attn."):
+                    top_number = top_number_attn
+                elif component.startswith("mlp."):
+                    top_number = top_number_ffn
+                else:
+                    raise AssertionError(f"component '{component}' not supported")
 
-                    activate_keys[component][layer_index] = np.argsort(hidden_scores[component][layer_index])[-top_number:][::-1]
+                activate_keys[component][layer_index] = np.argsort(hidden_scores[component][layer_index])[-top_number:][::-1]
 
             if combined_data is not None:
                 sorted_items = sorted(combined_data.items(), key=lambda item: item[1])
@@ -241,14 +218,6 @@ def Prompting(
 
     handles = []
 
-    if any(component.startswith("ffn_") for component in components):
-        for index, layer in enumerate(model.model.layers):
-            handles.append(
-                layer.mlp.register_forward_hook(
-                    mlp_hook_with_layer_idx(layer_idx=index),
-                )
-            )
-
     if any(component.startswith("attn_") for component in components):
         for index, layer in enumerate(model.model.layers):
             handles.append(
@@ -257,6 +226,15 @@ def Prompting(
                     with_kwargs=True,
                 )
             )
+
+    for component in components:
+        if not component.startswith("attn_"):
+            for index, layer in enumerate(model.model.layers):
+                handles.append(
+                    operator.attrgetter(component)(layer).register_forward_hook(
+                        component_hook_with_layer_idx(component=component, layer_idx=index),
+                    )
+                )
 
     if suppress_attention_mask_creation:
         for index, layer in enumerate(model.model.layers):
@@ -310,7 +288,6 @@ def _detect_neurons(
         top_number_attn,
         top_number_ffn,
         suppress_attention_mask_creation,
-        identical_ffn_up_and_down,
 ):
     file_path = os.path.join("corpus_all", language_corpus + ".txt")
     with open(file_path, 'r') as file:
@@ -332,7 +309,6 @@ def _detect_neurons(
                 top_number_attn=top_number_attn,
                 top_number_ffn=top_number_ffn,
                 suppress_attention_mask_creation=suppress_attention_mask_creation,
-                identical_ffn_up_and_down=identical_ffn_up_and_down,
             )
         except torch.cuda.OutOfMemoryError as e:
             error_count += 1
@@ -459,16 +435,13 @@ def _repeat_kv(hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor:
     "--component",
     "-o",
     "components",
-    default=(
-        ATTN_Q,
-        ATTN_K,
-        ATTN_V,
-        FFN_UP,
-        FFN_DOWN,
-    ),
-    type=click.Choice(COMPONENTS),
+    default=DEFAULT_COMPONENTS,
     multiple=True,
-    help="Component(s) to detect neurons in.",
+    help=("Component(s) to detect neurons in. "
+          "You can use any component supported by a particular HuggingFace model within a layer, "
+          "e.g. 'mlp.down_proj' to capture activations after the MLP down projection at each layer for Llama-style models. "
+          "Attention activations are a special case - specify one or more of the following: "
+          f"{_ATTN_COMPONENTS_STR}."),
 )
 @click.option(
     "--top-number-attn",
@@ -497,13 +470,6 @@ def _repeat_kv(hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor:
     ),
 )
 @click.option(
-    "--identical-ffn-up-and-down/--no-identical-ffn-up-and-down",
-    default=True,
-    help=(
-        "Produces the same detected neurons for both the up- and down-projection from MLP layers."
-    ),
-)
-@click.option(
     "--random-seed",
     default=112,
     help=(
@@ -520,7 +486,6 @@ def main(
     top_number_ffn,
     attn_implementation,
     suppress_attention_mask,
-    identical_ffn_up_and_down,
     random_seed,
 ):
     """Detects language-specific neurons based on the method by Zhao et al.: https://arxiv.org/abs/2402.18815
@@ -555,7 +520,6 @@ def main(
             top_number_attn,
             top_number_ffn,
             suppress_attention_mask,
-            identical_ffn_up_and_down,
         )
 
 
