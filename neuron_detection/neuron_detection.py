@@ -40,15 +40,13 @@ DEFAULT_COMPONENTS = (
 def Prompting(
         model,
         tokenizer,
-        prompt,
+        inputs,
         components,
         top_number_attn: int = 1000,
         top_number_ffn: int = 2000,
         top_number_layer: int = 24,
         suppress_attention_mask_creation: bool = True,
 ):
-    inputs = tokenizer(prompt, return_tensors="pt").to("cuda")
-
     hidden_states_as_lists = collections.defaultdict(list)
     hidden_scores = collections.defaultdict(dict)
     activate_keys = collections.defaultdict(dict)
@@ -284,6 +282,7 @@ def _detect_neurons(
         tokenizer,
         language_corpus,
         corpus_sample_size,
+        min_token_length,
         components,
         top_number_attn,
         top_number_ffn,
@@ -293,18 +292,30 @@ def _detect_neurons(
     with open(file_path, 'r') as file:
         lines = file.readlines()
     lines = [line.strip() for line in lines]
-    lines = random.sample(lines, corpus_sample_size)
+
+    print('Tokenizing input documents')
+
+    inputs_list = []
+    for prompt in tqdm(lines):
+        inputs = tokenizer(prompt, return_tensors="pt").to("cuda")
+        if min_token_length == -1 or inputs['input_ids'].flatten().shape[0] >= min_token_length:
+            inputs_list.append(inputs)
+
+    if corpus_sample_size != -1:
+        inputs_list = random.sample(inputs_list, corpus_sample_size)
 
     activate_keys_list = collections.defaultdict(list)
 
     error_count = 0
 
-    for prompt in tqdm(lines):
+    print('Detecting neurons')
+
+    for inputs in tqdm(inputs_list):
         try:
             _hidden_embed, _answer, activate_keys, _layer_keys = Prompting(
                 model,
                 tokenizer,
-                prompt,
+                inputs,
                 components,
                 top_number_attn=top_number_attn,
                 top_number_ffn=top_number_ffn,
@@ -427,6 +438,13 @@ def _repeat_kv(hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor:
     help="Number of documents to sample from the corpus given by --language-corpus.",
 )
 @click.option(
+    "--min-token-length",
+    default=50,
+    help=(
+        "Minimum token length to consider when sampling."
+    ),
+)
+@click.option(
     "--model-name",
     default="mistralai/Mistral-7B-Instruct-v0.2",
     help="Name of the model for which to detect language-specific neurons.",
@@ -480,6 +498,7 @@ def _repeat_kv(hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor:
 def main(
     language_corpora,
     corpus_sample_size,
+    min_token_length,
     model_name,
     components,
     top_number_attn,
@@ -516,6 +535,7 @@ def main(
             tokenizer,
             language_corpus,
             corpus_sample_size,
+            min_token_length,
             components,
             top_number_attn,
             top_number_ffn,
