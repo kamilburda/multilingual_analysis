@@ -263,17 +263,7 @@ def Prompting(
         for handle in handles:
             handle.remove()
 
-    hidden_states = {}
-    for layer_index in hidden_states_as_lists:
-        hidden_states[layer_index] = torch.cat(hidden_states_as_lists[layer_index], dim=-1)
-    
-    hidden_embed = {}
-    for layer_index in range(len(model.model.layers)):
-        hidden_embed[layer_index] = tokenizer.decode(hidden_states[layer_index][0])
-    answer = tokenizer.decode(outputs[0][0]).replace('<pad> ', '')
-    answer = answer.replace('</s>', '')
-    
-    return hidden_embed, answer, activate_keys, layer_keys
+    return activate_keys, layer_keys
 
 
 def _detect_neurons(
@@ -304,15 +294,34 @@ def _detect_neurons(
     if corpus_sample_size != -1:
         inputs_list = random.sample(inputs_list, corpus_sample_size)
 
+    print('Detecting neurons')
+
     activate_keys_list = collections.defaultdict(list)
 
     error_count = 0
 
-    print('Detecting neurons')
+    dirpath = os.path.join(
+        "output_neurons",
+        *model_name.split('/'),
+        language_corpus,
+    )
+    os.makedirs(dirpath, exist_ok=True)
+
+    dirpath_for_common_elements = os.path.join(
+        dirpath,
+        "common_elements",
+    )
+    os.makedirs(dirpath_for_common_elements, exist_ok=True)
+
+    filepath_root_for_common_elements = "common_elements"
+
+    inputs_counter = 0
+    common_elements_file_counter = 0
+    activate_keys_buffer_size = 1000
 
     for inputs in tqdm(inputs_list):
         try:
-            _hidden_embed, _answer, activate_keys, _layer_keys = Prompting(
+            activate_keys, _layer_keys = Prompting(
                 model,
                 tokenizer,
                 inputs,
@@ -325,20 +334,42 @@ def _detect_neurons(
             error_count += 1
             print(f"Encountered the following error: {e}")
         else:
-            for component in activate_keys:
-                activate_keys_list[component].append(activate_keys[component])
+            inputs_counter += 1
 
-    common_elements = {}
-    for component in activate_keys_list:
-        common_elements[component] = _get_common_elements_for_component(activate_keys_list, component)
-
-    dirpath = os.path.join(
-        "output_neurons",
-        *model_name.split('/'),
-        language_corpus,
+            common_elements_file_counter = _store_common_elements_per_part(
+                activate_keys,
+                activate_keys_list,
+                inputs_counter,
+                common_elements_file_counter,
+                activate_keys_buffer_size,
+                dirpath_for_common_elements,
+                filepath_root_for_common_elements,
+            )
+    
+    # Store the remaining activations after finishing the loop.
+    _store_common_elements_per_part(
+        activate_keys,
+        activate_keys_list,
+        0,  # Forces storing remaining data
+        common_elements_file_counter,
+        activate_keys_buffer_size,
+        dirpath_for_common_elements,
+        filepath_root_for_common_elements,
     )
 
-    os.makedirs(dirpath, exist_ok=True)
+    common_elements = {}
+    for filename in os.listdir(dirpath_for_common_elements):
+        with open(os.path.join(dirpath_for_common_elements, filename), 'rb') as file:
+            common_elements_per_file = pickle.load(file)
+
+        for component in common_elements_per_file:
+            if component in common_elements:
+                for key in common_elements[component]:
+                    if key in common_elements_per_file[component]:
+                        common_elements[component][key] = common_elements[component][key].intersection(
+                            common_elements_per_file[component][key])
+            else:
+                common_elements[component] = common_elements_per_file[component]
 
     filename_root = f"detected_neurons_{top_number_attn}_{top_number_ffn}_{corpus_sample_size - error_count}"
 
@@ -352,13 +383,40 @@ def _detect_neurons(
         pickle.dump(common_elements, file)
 
 
-def _get_common_elements_for_component(activate_keys_list, component):
+def _store_common_elements_per_part(
+        activate_keys,
+        activate_keys_list,
+        inputs_counter,
+        common_elements_file_counter,
+        activate_keys_buffer_size,
+        dirpath,
+        filepath_root_for_common_elements,
+):
+    for component in activate_keys:
+        activate_keys_list[component].append(activate_keys[component])
+
+    if inputs_counter % activate_keys_buffer_size == 0:
+        common_elements_file_counter += 1
+        
+        common_elements_per_part = {}
+        for component in activate_keys_list:
+            common_elements_per_part[component] = _get_common_elements_for_component(activate_keys_list[component])
+            activate_keys_list[component].clear()
+        
+        filepath = os.path.join(dirpath, f"{filepath_root_for_common_elements}_{common_elements_file_counter}.pkl")
+        with open(filepath, "wb") as file:
+            pickle.dump(common_elements_per_part, file)
+
+    return common_elements_file_counter
+
+
+def _get_common_elements_for_component(activate_keys_list_for_component):
     common_elements = {}
 
-    for key in activate_keys_list[component][0]:
-        if all(key in d for d in activate_keys_list[component]):
+    for key in activate_keys_list_for_component[0]:
+        if all(key in d for d in activate_keys_list_for_component):
             # Extract corresponding arrays and find common elements
-            arrays = [d[key] for d in activate_keys_list[component]]
+            arrays = [d[key] for d in activate_keys_list_for_component]
             common_elements[key] = set.intersection(*map(set, arrays))
 
     return common_elements
