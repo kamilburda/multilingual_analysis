@@ -1,6 +1,6 @@
 click
 pandas==2.2.3
-transformers==4.42.4
+transformers==4.43.4
 datasets==2.20.0
 requests==2.32.3
 tenacity==9.1.2
